@@ -40,6 +40,14 @@ const userSchema = new mongoose.Schema(
       type: String,
       default: "",
     },
+    college: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "College",
+    },
+    collegeName: {
+      type: String,
+      trim: true,
+    },
   },
   {
     timestamps: true,
