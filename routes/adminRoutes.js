@@ -6,6 +6,10 @@ const {
   makeAdmin,
   getAdminProfile,
   getAllAdmins,
+  getAllUsers,
+  getUserById,
+  updateUser,
+  deleteUser,
 } = require("../controllers/adminController");
 const {
   protectAdmin,
@@ -24,8 +28,16 @@ router.put("/makeadmin", protectAdmin, superadminOnly, makeAdmin);
 router.patch("/makeadmin", protectAdmin, superadminOnly, makeAdmin); // Alias
 router.post("/makeadmin", protectAdmin, superadminOnly, makeAdmin); // Alias
 
-// Additional helper routes
+// Admin profile & list routes
 router.get("/me", protectAdmin, getAdminProfile);
 router.get("/all", protectAdmin, superadminOnly, getAllAdmins);
+
+// ================= USER MANAGEMENT ROUTES =================
+// (Requires valid Admin or Superadmin JWT)
+router.get("/users", protectAdmin, getAllUsers);
+router.get("/users/:id", protectAdmin, getUserById);
+router.put("/users/:id", protectAdmin, updateUser);
+router.patch("/users/:id", protectAdmin, updateUser); // Alias
+router.delete("/users/:id", protectAdmin, deleteUser);
 
 module.exports = router;

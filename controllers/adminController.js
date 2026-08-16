@@ -1,4 +1,6 @@
 const Admin = require("../models/Admin");
+const User = require("../models/User");
+const College = require("../models/College");
 
 // @desc    Admin / Superadmin Login
 // @route   POST /api/admin/login
@@ -144,10 +146,111 @@ const getAllAdmins = async (req, res) => {
   }
 };
 
+// ================= USER MANAGEMENT CONTROLLERS =================
+
+// @desc    Retrieve all users
+// @route   GET /api/admin/users
+// @access  Private (Admin / Superadmin)
+const getAllUsers = async (req, res) => {
+  try {
+    const users = await User.find()
+      .select("-password")
+      .populate("college")
+      .sort({ createdAt: -1 });
+    res.json(users);
+  } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
+};
+
+// @desc    Get single user details by ID
+// @route   GET /api/admin/users/:id
+// @access  Private (Admin / Superadmin)
+const getUserById = async (req, res) => {
+  try {
+    const user = await User.findById(req.params.id)
+      .select("-password")
+      .populate("college");
+    if (!user) {
+      return res.status(404).json({ message: "User not found" });
+    }
+    res.json(user);
+  } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
+};
+
+// @desc    Update user details
+// @route   PUT /api/admin/users/:id
+// @access  Private (Admin / Superadmin)
+const updateUser = async (req, res) => {
+  try {
+    const { name, email, role, collegeName } = req.body;
+    const user = await User.findById(req.params.id);
+
+    if (!user) {
+      return res.status(404).json({ message: "User not found" });
+    }
+
+    if (name !== undefined) user.name = name;
+    if (email !== undefined) user.email = email;
+    if (role !== undefined) user.role = role;
+    if (collegeName !== undefined) user.collegeName = collegeName;
+
+    await user.save();
+
+    const updatedUser = await User.findById(user._id)
+      .select("-password")
+      .populate("college");
+
+    res.json({
+      message: "User updated successfully",
+      user: updatedUser,
+    });
+  } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
+};
+
+// @desc    Delete a user
+// @route   DELETE /api/admin/users/:id
+// @access  Private (Admin / Superadmin)
+const deleteUser = async (req, res) => {
+  try {
+    const user = await User.findById(req.params.id);
+
+    if (!user) {
+      return res.status(404).json({ message: "User not found" });
+    }
+
+    // If user belonged to a college, decrement college team count
+    if (user.college) {
+      const college = await College.findById(user.college);
+      if (college && college.totalTeams > 0) {
+        college.totalTeams -= 1;
+        await college.save();
+      }
+    }
+
+    await User.findByIdAndDelete(req.params.id);
+
+    res.json({
+      message: "User deleted successfully",
+      _id: req.params.id,
+    });
+  } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
+};
+
 module.exports = {
   loginAdmin,
   addAdmin,
   makeAdmin,
   getAdminProfile,
   getAllAdmins,
+  getAllUsers,
+  getUserById,
+  updateUser,
+  deleteUser,
 };
