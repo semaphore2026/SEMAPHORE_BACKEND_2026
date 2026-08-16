@@ -1,6 +1,6 @@
 const jwt = require("jsonwebtoken");
 const User = require("../models/User");
-
+const College = require("../models/College");
 const { OAuth2Client } = require("google-auth-library");
 
 // Helper function to generate JWT token
@@ -10,73 +10,34 @@ const generateToken = (id) => {
   });
 };
 
-// @desc    Register a new user
-// @route   POST /api/auth/register
-// @access  Public
-const registerUser = async (req, res) => {
-  try {
-    const { name, email, password, role } = req.body;
+// Helper function to process college assignment and enforce max 2 teams
+const handleCollegeRegistration = async (collegeName) => {
+  if (!collegeName || !collegeName.trim()) {
+    throw { status: 400, message: "Please select a college name to complete registration" };
+  }
 
-    if (!name || !email || !password) {
-      return res.status(400).json({ message: "Please fill in all required fields" });
+  const cleanName = collegeName.trim();
+  let college = await College.findOne({
+    collegeName: { $regex: new RegExp(`^${cleanName}$`, "i") },
+  });
+
+  if (college) {
+    if (college.totalTeams >= 2) {
+      throw {
+        status: 400,
+        message: `Registration failed: '${college.collegeName}' has already reached the maximum limit of 2 registered accounts/teams.`,
+      };
     }
-
-    const userExists = await User.findOne({ email });
-    if (userExists) {
-      return res.status(400).json({ message: "User already exists with this email" });
-    }
-
-    const user = await User.create({
-      name,
-      email,
-      password,
-      role: role || "user",
+    college.totalTeams += 1;
+    await college.save();
+  } else {
+    college = await College.create({
+      collegeName: cleanName,
+      totalTeams: 1,
     });
-
-    if (user) {
-      res.status(201).json({
-        _id: user._id,
-        name: user.name,
-        email: user.email,
-        role: user.role,
-        token: generateToken(user._id),
-      });
-    } else {
-      res.status(400).json({ message: "Invalid user data" });
-    }
-  } catch (error) {
-    res.status(500).json({ message: error.message });
   }
-};
 
-// @desc    Authenticate user & get token (Login)
-// @route   POST /api/auth/login
-// @access  Public
-const loginUser = async (req, res) => {
-  try {
-    const { email, password } = req.body;
-
-    if (!email || !password) {
-      return res.status(400).json({ message: "Please provide email and password" });
-    }
-
-    const user = await User.findOne({ email });
-
-    if (user && (await user.matchPassword(password))) {
-      res.json({
-        _id: user._id,
-        name: user.name,
-        email: user.email,
-        role: user.role,
-        avatar: user.avatar,
-        token: generateToken(user._id),
-      });
-    } else {
-      res.status(401).json({ message: "Invalid email or password" });
-    }
-  } catch (error) {
-    res.status(500).json({ message: error.message });
-  }
+  return college;
 };
 
 // @desc    Google OAuth Signup / Login
@@ -84,12 +45,12 @@ const loginUser = async (req, res) => {
 // @access  Public
 const googleAuth = async (req, res) => {
   try {
-    const { idToken, token, accessToken, credential } = req.body;
+    const { idToken, token, accessToken, credential, collegeName } = req.body;
     const targetToken = credential || idToken || token;
 
     if (!targetToken && !accessToken) {
-      return res.status(400).json({ 
-        message: "Google ID Token or Access Token is required in request body ({ idToken } or { accessToken })" 
+      return res.status(400).json({
+        message: "Google ID Token or Access Token is required",
       });
     }
 
@@ -97,7 +58,7 @@ const googleAuth = async (req, res) => {
     let googleId, email, name, picture;
 
     if (targetToken) {
-      // Verify ID Token sent from Frontend (Google Sign-In / One Tap)
+      // Verify ID Token sent from Frontend
       const ticket = await client.verifyIdToken({
         idToken: targetToken,
         audience: process.env.GOOGLE_CLIENT_ID,
@@ -109,11 +70,11 @@ const googleAuth = async (req, res) => {
       name = payload.name;
       picture = payload.picture;
     } else if (accessToken) {
-      // Verify Access Token via Google API
+      // Verify Access Token via Google UserInfo API
       const response = await fetch("https://www.googleapis.com/oauth2/v3/userinfo", {
         headers: { Authorization: `Bearer ${accessToken}` },
       });
-      
+
       const userInfo = await response.json();
       if (!response.ok || userInfo.error) {
         return res.status(401).json({ message: "Invalid Google Access Token" });
@@ -129,24 +90,36 @@ const googleAuth = async (req, res) => {
       return res.status(400).json({ message: "Could not retrieve email from Google" });
     }
 
-    // Find user by googleId or email
-    let user = await User.findOne({ $or: [{ googleId }, { email }] });
+    // Find existing user by googleId or email
+    let user = await User.findOne({ $or: [{ googleId }, { email }] }).populate("college");
 
     if (user) {
-      // Link Google ID if user previously registered via email/password
+      // LOGIN FLOW: User already registered
       if (!user.googleId) {
         user.googleId = googleId;
         if (!user.avatar && picture) user.avatar = picture;
         await user.save();
       }
     } else {
-      // Create new user via Google Signup
+      // SIGNUP FLOW: New User registration requires college selection & limit check
+      let college;
+      try {
+        college = await handleCollegeRegistration(collegeName);
+      } catch (collegeErr) {
+        return res.status(collegeErr.status || 400).json({ message: collegeErr.message });
+      }
+
       user = await User.create({
         name: name || "Google User",
         email,
         googleId,
         avatar: picture || "",
+        college: college._id,
+        collegeName: college.collegeName,
       });
+
+      // Populate college details on new user object
+      user.college = college;
     }
 
     // Generate backend JWT token
@@ -160,6 +133,9 @@ const googleAuth = async (req, res) => {
       role: user.role,
       avatar: user.avatar,
       googleId: user.googleId,
+      collegeId: user.college ? user.college._id : null,
+      college: user.college,
+      collegeName: user.collegeName,
       token: jwtToken,
     });
   } catch (error) {
@@ -168,12 +144,94 @@ const googleAuth = async (req, res) => {
   }
 };
 
+// @desc    Register User with Email/Password (Optional fallback)
+// @route   POST /api/auth/register
+// @access  Public
+const registerUser = async (req, res) => {
+  try {
+    const { name, email, password, role, collegeName } = req.body;
+
+    if (!name || !email || !password || !collegeName) {
+      return res
+        .status(400)
+        .json({ message: "Please fill in all required fields (name, email, password, collegeName)" });
+    }
+
+    const userExists = await User.findOne({ email });
+    if (userExists) {
+      return res.status(400).json({ message: "User already exists with this email" });
+    }
+
+    let college;
+    try {
+      college = await handleCollegeRegistration(collegeName);
+    } catch (collegeErr) {
+      return res.status(collegeErr.status || 400).json({ message: collegeErr.message });
+    }
+
+    const user = await User.create({
+      name,
+      email,
+      password,
+      role: role || "user",
+      college: college._id,
+      collegeName: college.collegeName,
+    });
+
+    res.status(201).json({
+      _id: user._id,
+      name: user.name,
+      email: user.email,
+      role: user.role,
+      collegeId: user.college,
+      college: college,
+      collegeName: user.collegeName,
+      token: generateToken(user._id),
+    });
+  } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
+};
+
+// @desc    Authenticate User with Email/Password (Login)
+// @route   POST /api/auth/login
+// @access  Public
+const loginUser = async (req, res) => {
+  try {
+    const { email, password } = req.body;
+
+    if (!email || !password) {
+      return res.status(400).json({ message: "Please provide email and password" });
+    }
+
+    const user = await User.findOne({ email }).populate("college");
+
+    if (user && (await user.matchPassword(password))) {
+      res.json({
+        _id: user._id,
+        name: user.name,
+        email: user.email,
+        role: user.role,
+        avatar: user.avatar,
+        collegeId: user.college ? user.college._id : null,
+        college: user.college,
+        collegeName: user.collegeName,
+        token: generateToken(user._id),
+      });
+    } else {
+      res.status(401).json({ message: "Invalid email or password" });
+    }
+  } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
+};
+
 // @desc    Get user profile
 // @route   GET /api/auth/me
 // @access  Private
 const getUserProfile = async (req, res) => {
   try {
-    const user = await User.findById(req.user._id).select("-password");
+    const user = await User.findById(req.user._id).select("-password").populate("college");
     if (user) {
       res.json(user);
     } else {
@@ -185,8 +243,8 @@ const getUserProfile = async (req, res) => {
 };
 
 module.exports = {
+  googleAuth,
   registerUser,
   loginUser,
-  googleAuth,
   getUserProfile,
 };
