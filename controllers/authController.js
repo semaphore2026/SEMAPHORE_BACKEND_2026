@@ -3,8 +3,6 @@ const User = require("../models/User");
 
 const { OAuth2Client } = require("google-auth-library");
 
-const googleClient = new OAuth2Client(process.env.GOOGLE_CLIENT_ID);
-
 // Helper function to generate JWT token
 const generateToken = (id) => {
   return jwt.sign({ id }, process.env.JWT_SECRET, {
@@ -81,33 +79,68 @@ const loginUser = async (req, res) => {
   }
 };
 
-// @desc    Google OAuth Login / Register
+// @desc    Google OAuth Signup / Login
 // @route   POST /api/auth/google
 // @access  Public
 const googleAuth = async (req, res) => {
   try {
-    const { idToken } = req.body;
+    const { idToken, token, accessToken, credential } = req.body;
+    const targetToken = credential || idToken || token;
 
-    if (!idToken) {
-      return res.status(400).json({ message: "Google ID Token is required" });
+    if (!targetToken && !accessToken) {
+      return res.status(400).json({ 
+        message: "Google ID Token or Access Token is required in request body ({ idToken } or { accessToken })" 
+      });
     }
 
-    const ticket = await googleClient.verifyIdToken({
-      idToken,
-      audience: process.env.GOOGLE_CLIENT_ID,
-    });
+    const client = new OAuth2Client(process.env.GOOGLE_CLIENT_ID);
+    let googleId, email, name, picture;
 
-    const { sub: googleId, email, name, picture } = ticket.getPayload();
+    if (targetToken) {
+      // Verify ID Token sent from Frontend (Google Sign-In / One Tap)
+      const ticket = await client.verifyIdToken({
+        idToken: targetToken,
+        audience: process.env.GOOGLE_CLIENT_ID,
+      });
 
+      const payload = ticket.getPayload();
+      googleId = payload.sub;
+      email = payload.email;
+      name = payload.name;
+      picture = payload.picture;
+    } else if (accessToken) {
+      // Verify Access Token via Google API
+      const response = await fetch("https://www.googleapis.com/oauth2/v3/userinfo", {
+        headers: { Authorization: `Bearer ${accessToken}` },
+      });
+      
+      const userInfo = await response.json();
+      if (!response.ok || userInfo.error) {
+        return res.status(401).json({ message: "Invalid Google Access Token" });
+      }
+
+      googleId = userInfo.sub;
+      email = userInfo.email;
+      name = userInfo.name;
+      picture = userInfo.picture;
+    }
+
+    if (!email) {
+      return res.status(400).json({ message: "Could not retrieve email from Google" });
+    }
+
+    // Find user by googleId or email
     let user = await User.findOne({ $or: [{ googleId }, { email }] });
 
     if (user) {
+      // Link Google ID if user previously registered via email/password
       if (!user.googleId) {
         user.googleId = googleId;
         if (!user.avatar && picture) user.avatar = picture;
         await user.save();
       }
     } else {
+      // Create new user via Google Signup
       user = await User.create({
         name: name || "Google User",
         email,
@@ -116,13 +149,18 @@ const googleAuth = async (req, res) => {
       });
     }
 
-    res.json({
+    // Generate backend JWT token
+    const jwtToken = generateToken(user._id);
+
+    res.status(200).json({
+      message: "Google Authentication successful",
       _id: user._id,
       name: user.name,
       email: user.email,
       role: user.role,
       avatar: user.avatar,
-      token: generateToken(user._id),
+      googleId: user.googleId,
+      token: jwtToken,
     });
   } catch (error) {
     console.error("Google Auth Error:", error);
