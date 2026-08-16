@@ -22,16 +22,29 @@ const eventSchema = new mongoose.Schema(
     capacity: {
       type: Number,
       default: 100,
+      min: 1,
+    },
+    registrationFee: {
+      type: Number,
+      default: 0,
+      min: 0,
     },
     image: {
       type: String,
       default: "",
     },
-    organizer: {
-      type: mongoose.Schema.Types.ObjectId,
-      ref: "User",
-      required: true,
-    },
+    coordinators: [
+      {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: "User",
+      },
+    ],
+    timings: [
+      {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: "Timetable",
+      },
+    ],
   },
   {
     timestamps: true,
