@@ -5,11 +5,13 @@ const Event = require("../models/Event");
 // @access  Private
 const createEvent = async (req, res) => {
   try {
-    const { title, description, location, date, capacity } = req.body;
+    const { title, description, location, date, capacity, image } = req.body;
 
     if (!title || !description || !location || !date) {
       return res.status(400).json({ message: "Please fill in all required fields" });
     }
+
+    const imageUrl = req.file ? req.file.path : image || "";
 
     const event = await Event.create({
       title,
@@ -17,6 +19,7 @@ const createEvent = async (req, res) => {
       location,
       date,
       capacity,
+      image: imageUrl,
       organizer: req.user._id,
     });
 

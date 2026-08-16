@@ -23,6 +23,10 @@ const eventSchema = new mongoose.Schema(
       type: Number,
       default: 100,
     },
+    image: {
+      type: String,
+      default: "",
+    },
     organizer: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "User",
