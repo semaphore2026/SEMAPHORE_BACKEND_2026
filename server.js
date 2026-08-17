@@ -9,6 +9,7 @@ const eventRoutes = require("./routes/eventRoutes");
 const collegeRoutes = require("./routes/collegeRoutes");
 const adminRoutes = require("./routes/adminRoutes");
 const timetableRoutes = require("./routes/timetableRoutes");
+const registrationRoutes = require("./routes/registrationRoutes");
 
 // Initialize Database Connection
 connectDB();
@@ -35,6 +36,9 @@ app.use("/api/events", eventRoutes);
 app.use("/api/colleges", collegeRoutes);
 app.use("/api/admin", adminRoutes);
 app.use("/api/timetable", timetableRoutes);
+app.use("/api/registrations", registrationRoutes);
+app.use("/api/event-registrations", registrationRoutes);
+
 
 // 404 Handler
 app.use((req, res, next) => {
