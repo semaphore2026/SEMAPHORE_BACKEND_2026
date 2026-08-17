@@ -5,6 +5,7 @@ const {
   loginUser,
   googleAuth,
   getUserProfile,
+  verifyUser,
 } = require("../controllers/authController");
 const { protect } = require("../middleware/authMiddleware");
 
@@ -15,5 +16,9 @@ router.post("/google", googleAuth);
 
 // Protected routes
 router.get("/me", protect, getUserProfile);
+router.get("/verifyuser", protect, verifyUser);
+router.get("/verifyUser", protect, verifyUser);
+router.get("/verify-user", protect, verifyUser);
 
 module.exports = router;
+

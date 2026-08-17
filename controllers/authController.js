@@ -242,9 +242,44 @@ const getUserProfile = async (req, res) => {
   }
 };
 
+// @desc    Verify user token and return user data (same payload structure as login response)
+// @route   GET /api/auth/verifyuser
+// @access  Private
+const verifyUser = async (req, res) => {
+  try {
+    const user = await User.findById(req.user._id).select("-password").populate("college");
+    if (!user) {
+      return res.status(404).json({ message: "User not found" });
+    }
+
+    // Retrieve token from Authorization header if present
+    let token = "";
+    if (req.headers.authorization && req.headers.authorization.startsWith("Bearer")) {
+      token = req.headers.authorization.split(" ")[1];
+    }
+
+    res.status(200).json({
+      _id: user._id,
+      name: user.name,
+      email: user.email,
+      role: user.role,
+      avatar: user.avatar,
+      googleId: user.googleId,
+      collegeId: user.college ? user.college._id : null,
+      college: user.college,
+      collegeName: user.collegeName,
+      token: token || generateToken(user._id),
+    });
+  } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
+};
+
 module.exports = {
   googleAuth,
   registerUser,
   loginUser,
   getUserProfile,
+  verifyUser,
 };
+
