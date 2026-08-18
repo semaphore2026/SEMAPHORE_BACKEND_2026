@@ -2,13 +2,13 @@ const EventRegistration = require("../models/EventRegistrations");
 const Payment = require("../models/Payment");
 const Event = require("../models/Event");
 
-// @desc    Add event(s) to user's registration
+// @desc    Add event(s) to user's registration with participants validation
 // @route   POST /api/registrations/events
 // @access  Private (User)
 const addEventsToRegistration = async (req, res) => {
   try {
     const userId = req.user._id;
-    const { eventId, eventIds } = req.body;
+    const { eventId, eventIds, participants } = req.body;
 
     // Collect event IDs to add
     let idsToAdd = [];
@@ -31,7 +31,48 @@ const addEventsToRegistration = async (req, res) => {
       return res.status(404).json({ message: "No valid events found for provided IDs" });
     }
 
-    const validEventIds = validEvents.map((e) => e._id.toString());
+    // Validate participant count against minParticipants & maxParticipants for each event
+    const eventParticipantsMap = new Map();
+
+    for (const event of validEvents) {
+      const min = event.minParticipants || 1;
+      const max = event.maxParticipants || 1;
+
+      let eventParticipants = [];
+      if (Array.isArray(participants) && participants.length > 0) {
+        eventParticipants = participants.map((p) => {
+          if (typeof p === "string") return { name: p.trim() };
+          return {
+            name: p.name ? String(p.name).trim() : "",
+            email: p.email ? String(p.email).trim() : "",
+            phone: p.phone ? String(p.phone).trim() : "",
+            college: p.college ? String(p.college).trim() : "",
+          };
+        });
+      } else if (min === 1) {
+        eventParticipants = [
+          {
+            name: req.user.name || "",
+            email: req.user.email || "",
+            college: req.user.collegeName || "",
+          },
+        ];
+      }
+
+      if (eventParticipants.length < min) {
+        return res.status(400).json({
+          message: `Participant count (${eventParticipants.length}) is less than the minimum required (${min}) for event '${event.title}'`,
+        });
+      }
+
+      if (eventParticipants.length > max) {
+        return res.status(400).json({
+          message: `Participant count (${eventParticipants.length}) exceeds the maximum allowed (${max}) for event '${event.title}'`,
+        });
+      }
+
+      eventParticipantsMap.set(event._id.toString(), eventParticipants);
+    }
 
     // Find or create EventRegistration for user
     let registration = await EventRegistration.findOne({ userId });
@@ -44,14 +85,24 @@ const addEventsToRegistration = async (req, res) => {
       });
     }
 
-    // Add unique events
-    const existingEventIds = registration.events.map((e) => e.eventId.toString());
-
     let addedCount = 0;
-    for (const id of validEventIds) {
-      if (!existingEventIds.includes(id)) {
+    let updatedCount = 0;
+
+    for (const event of validEvents) {
+      const idStr = event._id.toString();
+      const eventParticipants = eventParticipantsMap.get(idStr) || [];
+      const existingIndex = registration.events.findIndex(
+        (e) => e.eventId.toString() === idStr
+      );
+
+      if (existingIndex > -1) {
+        registration.events[existingIndex].participants = eventParticipants;
+        registration.events[existingIndex].addedAt = new Date();
+        updatedCount++;
+      } else {
         registration.events.push({
-          eventId: id,
+          eventId: event._id,
+          participants: eventParticipants,
           paymentId: null,
           addedAt: new Date(),
         });
@@ -66,13 +117,13 @@ const addEventsToRegistration = async (req, res) => {
     const updatedRegistration = await EventRegistration.findById(registration._id)
       .populate({
         path: "events.eventId",
-        select: "title description location date capacity registrationFee image",
+        select: "title description location date capacity minParticipants maxParticipants registrationFee image coordinators timings",
       })
       .populate("events.paymentId")
       .populate("userId", "name email collegeName avatar");
 
     res.status(200).json({
-      message: `${addedCount} new event(s) added successfully`,
+      message: `Registration updated successfully (${addedCount} added, ${updatedCount} updated)`,
       registration: updatedRegistration,
     });
   } catch (error) {
@@ -82,7 +133,7 @@ const addEventsToRegistration = async (req, res) => {
 };
 
 // @desc    Retrieve user's registered events
-// @route   GET /api/registrations
+// @route   GET /api/registrations (and /api/registrations/my-events, /api/registrations/me, /api/registrations/user)
 // @access  Private (User)
 const getUserRegistrations = async (req, res) => {
   try {
@@ -91,7 +142,7 @@ const getUserRegistrations = async (req, res) => {
     const registration = await EventRegistration.findOne({ userId })
       .populate({
         path: "events.eventId",
-        select: "title description location date capacity registrationFee image coordinators timings",
+        select: "title description location date capacity minParticipants maxParticipants registrationFee image coordinators timings",
       })
       .populate("events.paymentId")
       .populate("userId", "name email collegeName avatar");

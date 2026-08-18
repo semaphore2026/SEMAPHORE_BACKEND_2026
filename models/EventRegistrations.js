@@ -14,6 +14,14 @@ const eventRegistrationSchema = new mongoose.Schema(
           ref: "Event",
           required: true,
         },
+        participants: [
+          {
+            name: { type: String, trim: true },
+            email: { type: String, trim: true },
+            phone: { type: String, trim: true },
+            college: { type: String, trim: true },
+          },
+        ],
         paymentId: {
           type: mongoose.Schema.Types.ObjectId,
           ref: "Payment",

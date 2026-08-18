@@ -29,6 +29,16 @@ const eventSchema = new mongoose.Schema(
       default: 0,
       min: 0,
     },
+    minParticipants: {
+      type: Number,
+      default: 1,
+      min: [1, "Minimum participants must be at least 1"],
+    },
+    maxParticipants: {
+      type: Number,
+      default: 1,
+      min: [1, "Maximum participants must be at least 1"],
+    },
     image: {
       type: String,
       default: "",

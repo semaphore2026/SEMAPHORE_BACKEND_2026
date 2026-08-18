@@ -51,9 +51,12 @@ const protectAnyAdmin = async (req, res, next) => {
 // User Protected Routes (Requires User JWT header)
 router.post("/events", protect, addEventsToRegistration);
 router.post("/add", protect, addEventsToRegistration); // Alias route
+router.post("/register", protect, addEventsToRegistration); // Alias route
 
 router.get("/", protect, getUserRegistrations);
 router.get("/me", protect, getUserRegistrations); // Alias route
+router.get("/my-events", protect, getUserRegistrations); // Alias route
+router.get("/user", protect, getUserRegistrations); // Alias route
 
 router.post("/payment", protect, upload.any(), makePayment);
 router.post("/pay", protect, upload.any(), makePayment); // Alias route

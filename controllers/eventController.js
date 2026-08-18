@@ -19,12 +19,16 @@ const handleError = (res, error) => {
 // @access  Private
 const createEvent = async (req, res) => {
   try {
-    const { title, description, location, date, capacity, registrationFee, image, coordinators, timings } = req.body;
+    const { title, description, location, date, capacity, registrationFee, minParticipants, maxParticipants, image, coordinators, timings } = req.body;
 
     if (!title) return res.status(400).json({ success: false, message: "Event title is required" });
     if (!description) return res.status(400).json({ success: false, message: "Event description is required" });
     if (!location) return res.status(400).json({ success: false, message: "Event location is required" });
     if (!date) return res.status(400).json({ success: false, message: "Event date is required" });
+
+    if (minParticipants !== undefined && maxParticipants !== undefined && Number(minParticipants) > Number(maxParticipants)) {
+      return res.status(400).json({ success: false, message: "minParticipants cannot be greater than maxParticipants" });
+    }
 
     // Validate timings before creation
     if (timings && Array.isArray(timings)) {
@@ -47,6 +51,8 @@ const createEvent = async (req, res) => {
       date,
       capacity,
       registrationFee,
+      minParticipants,
+      maxParticipants,
       image: imageUrl,
       coordinators,
     });
@@ -146,6 +152,12 @@ const updateEvent = async (req, res) => {
     // Don't allow updating timings from this endpoint, use PATCH /timings
     if (req.body.timings) {
       delete req.body.timings;
+    }
+
+    const newMin = req.body.minParticipants !== undefined ? Number(req.body.minParticipants) : event.minParticipants;
+    const newMax = req.body.maxParticipants !== undefined ? Number(req.body.maxParticipants) : event.maxParticipants;
+    if (newMin > newMax) {
+      return res.status(400).json({ success: false, message: "minParticipants cannot be greater than maxParticipants" });
     }
 
     const updatedEvent = await Event.findByIdAndUpdate(req.params.id, req.body, {
