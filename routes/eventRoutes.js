@@ -9,15 +9,15 @@ const {
   updateCoordinators,
   updateTimings,
 } = require("../controllers/eventController");
-const { protect } = require("../middleware/authMiddleware");
+const { protect, protectAnyAdmin } = require("../middleware/authMiddleware");
 const { upload } = require("../config/cloudinary");
 
 // Public routes
 router.get("/", getEvents);
 router.get("/:id", getEventById);
 
-// Protected routes
-router.post("/", protect, upload.single("image"), createEvent);
+// Protected routes (Create Event - Admin ONLY)
+router.post("/", protectAnyAdmin, upload.single("image"), createEvent);
 router.put("/:id", protect, upload.single("image"), updateEvent);
 router.patch("/:id", protect, upload.single("image"), updateEvent);
 router.patch("/:id/coordinators", protect, updateCoordinators);
