@@ -48,6 +48,11 @@ const userSchema = new mongoose.Schema(
       type: String,
       trim: true,
     },
+    teamid: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "Team",
+      default: null,
+    },
   },
   {
     timestamps: true,

@@ -10,6 +10,9 @@ const {
   getUserById,
   updateUser,
   deleteUser,
+  getRecentPayments,
+  getPaymentDetails,
+  updatePaymentStatusWithMessage,
 } = require("../controllers/adminController");
 const {
   protectAdmin,
@@ -39,5 +42,18 @@ router.get("/users/:id", protectAdmin, getUserById);
 router.put("/users/:id", protectAdmin, updateUser);
 router.patch("/users/:id", protectAdmin, updateUser); // Alias
 router.delete("/users/:id", protectAdmin, deleteUser);
+
+// ================= ADMIN PAYMENT MANAGEMENT ROUTES =================
+// (Requires valid Admin or Superadmin JWT)
+router.get("/recent-payments", protectAdmin, getRecentPayments);
+router.get("/payments/recent", protectAdmin, getRecentPayments); // Alias
+
+router.get("/payment-details/:paymentId", protectAdmin, getPaymentDetails);
+router.get("/payments/:paymentId", protectAdmin, getPaymentDetails); // Alias
+
+router.post("/payment-status", protectAdmin, updatePaymentStatusWithMessage);
+router.put("/payment-status", protectAdmin, updatePaymentStatusWithMessage); // Alias
+router.put("/payment-status/:paymentId", protectAdmin, updatePaymentStatusWithMessage); // Alias
+router.put("/payments/:paymentId/status", protectAdmin, updatePaymentStatusWithMessage); // Alias
 
 module.exports = router;

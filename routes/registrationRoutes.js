@@ -7,7 +7,6 @@ const {
   addEventsToRegistration,
   getUserRegistrations,
   makePayment,
-  updatePaymentStatus,
   getAllRegistrations,
   getPendingPayments,
   getApprovedPayments,
@@ -15,6 +14,9 @@ const {
   getTotalUsers,
   getTotalTeams,
 } = require("../controllers/registrationController");
+const {
+  updatePaymentStatusWithMessage,
+} = require("../controllers/adminController");
 const { protect } = require("../middleware/authMiddleware");
 const { upload } = require("../config/cloudinary");
 
@@ -74,10 +76,10 @@ router.get("/payments/pending", protectAnyAdmin, getPendingPayments);
 router.get("/payments/approved", protectAnyAdmin, getApprovedPayments);
 
 // Admin Protected Routes (Requires Admin JWT header)
-router.put("/:id/payment-status", protectAnyAdmin, updatePaymentStatus);
-router.patch("/:id/payment-status", protectAnyAdmin, updatePaymentStatus);
-router.put("/payment-status/:id", protectAnyAdmin, updatePaymentStatus);
-router.patch("/payment-status/:id", protectAnyAdmin, updatePaymentStatus);
+router.put("/:id/payment-status", protectAnyAdmin, updatePaymentStatusWithMessage);
+router.patch("/:id/payment-status", protectAnyAdmin, updatePaymentStatusWithMessage);
+router.put("/payment-status/:id", protectAnyAdmin, updatePaymentStatusWithMessage);
+router.patch("/payment-status/:id", protectAnyAdmin, updatePaymentStatusWithMessage);
 
 router.get("/all", protectAnyAdmin, getAllRegistrations);
 

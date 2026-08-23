@@ -1,6 +1,8 @@
 const Admin = require("../models/Admin");
 const User = require("../models/User");
 const College = require("../models/College");
+const Payment = require("../models/Payment");
+const EventRegistration = require("../models/EventRegistrations");
 
 // @desc    Admin / Superadmin Login
 // @route   POST /api/admin/login
@@ -243,6 +245,162 @@ const deleteUser = async (req, res) => {
   }
 };
 
+// ================= ADMIN PAYMENT MANAGEMENT CONTROLLERS =================
+
+// @desc    Get recent payments (amount, utr, imageurl, status, message)
+// @route   GET /api/admin/recent-payments
+// @access  Private (Admin / Superadmin)
+const getRecentPayments = async (req, res) => {
+  try {
+    const payments = await Payment.find()
+      .populate({
+        path: "user",
+        select: "name email collegeName avatar teamid",
+        populate: { path: "teamid" },
+      })
+      .sort({ createdAt: -1 });
+
+    const formattedPayments = payments.map((p) => ({
+      _id: p._id,
+      user: p.user,
+      amount: p.amount,
+      utr: p.utr,
+      imageUrl: p.imageUrl,
+      imageurl: p.imageUrl,
+      timestamp: p.timestamp || p.createdAt,
+      status: p.status,
+      message: p.message || "",
+      createdAt: p.createdAt,
+      updatedAt: p.updatedAt,
+    }));
+
+    res.status(200).json({
+      count: formattedPayments.length,
+      payments: formattedPayments,
+    });
+  } catch (error) {
+    console.error("Get Recent Payments Error:", error);
+    res.status(500).json({ message: error.message });
+  }
+};
+
+// @desc    View details by payment ID (returns events associated with that payment ID)
+// @route   GET /api/admin/payment-details/:paymentId
+// @access  Private (Admin / Superadmin)
+const getPaymentDetails = async (req, res) => {
+  try {
+    const paymentId = req.params.paymentId || req.params.id || req.query.paymentId;
+
+    if (!paymentId) {
+      return res.status(400).json({ message: "Please provide paymentId" });
+    }
+
+    const payment = await Payment.findById(paymentId).populate({
+      path: "user",
+      select: "name email collegeName avatar teamid",
+      populate: { path: "teamid" },
+    });
+
+    if (!payment) {
+      return res.status(404).json({ message: "Payment record not found" });
+    }
+
+    // Find all event registrations associated with this paymentId
+    const registrations = await EventRegistration.find({
+      paymentId: paymentId,
+    }).populate("eventId");
+
+    const associatedEvents = registrations.map((r) => ({
+      registrationId: r._id,
+      event: r.eventId,
+      createdAt: r.createdAt,
+    }));
+
+    res.status(200).json({
+      payment: {
+        _id: payment._id,
+        user: payment.user,
+        amount: payment.amount,
+        utr: payment.utr,
+        imageUrl: payment.imageUrl,
+        imageurl: payment.imageUrl,
+        timestamp: payment.timestamp || payment.createdAt,
+        status: payment.status,
+        message: payment.message || "",
+        createdAt: payment.createdAt,
+        updatedAt: payment.updatedAt,
+      },
+      associatedEvents,
+    });
+  } catch (error) {
+    console.error("Get Payment Details Error:", error);
+    res.status(500).json({ message: error.message });
+  }
+};
+
+// @desc    Approve or Reject payment with message
+// @route   POST /api/admin/payment-status (also PUT /api/admin/payments/:paymentId/status)
+// @access  Private (Admin / Superadmin)
+const updatePaymentStatusWithMessage = async (req, res) => {
+  try {
+    const paymentId = req.params.paymentId || req.params.id || req.body.paymentId;
+    const { status, message, paymentStatus } = req.body;
+    const targetStatus = status || paymentStatus;
+
+    if (!paymentId) {
+      return res.status(400).json({ message: "Please provide paymentId" });
+    }
+
+    if (!targetStatus) {
+      return res.status(400).json({ message: "Please provide status ('approved' or 'rejected')" });
+    }
+
+    const normalizedStatus = String(targetStatus).toLowerCase().trim();
+    if (!["approved", "rejected", "verified", "pending", "submitted"].includes(normalizedStatus)) {
+      return res.status(400).json({
+        message: "Invalid status. Must be 'approved' or 'rejected'",
+      });
+    }
+
+    const payment = await Payment.findById(paymentId);
+    if (!payment) {
+      return res.status(404).json({ message: "Payment record not found" });
+    }
+
+    payment.status = normalizedStatus;
+    if (message !== undefined) {
+      payment.message = String(message).trim();
+    }
+    await payment.save();
+
+    const updatedPayment = await Payment.findById(payment._id).populate({
+      path: "user",
+      select: "name email collegeName avatar teamid",
+      populate: { path: "teamid" },
+    });
+
+    res.status(200).json({
+      message: `Payment status updated to '${normalizedStatus}' successfully`,
+      payment: {
+        _id: updatedPayment._id,
+        user: updatedPayment.user,
+        amount: updatedPayment.amount,
+        utr: updatedPayment.utr,
+        imageUrl: updatedPayment.imageUrl,
+        imageurl: updatedPayment.imageUrl,
+        timestamp: updatedPayment.timestamp,
+        status: updatedPayment.status,
+        message: updatedPayment.message,
+        createdAt: updatedPayment.createdAt,
+        updatedAt: updatedPayment.updatedAt,
+      },
+    });
+  } catch (error) {
+    console.error("Update Payment Status Error:", error);
+    res.status(500).json({ message: error.message });
+  }
+};
+
 module.exports = {
   loginAdmin,
   addAdmin,
@@ -253,4 +411,8 @@ module.exports = {
   getUserById,
   updateUser,
   deleteUser,
+  getRecentPayments,
+  getPaymentDetails,
+  updatePaymentStatusWithMessage,
 };
+
