@@ -3,6 +3,7 @@ const User = require("../models/User");
 const College = require("../models/College");
 const Team = require("../models/Team");
 const EventRegistration = require("../models/EventRegistrations");
+const { formatRegistration } = require("../utils/formatRegistration");
 const { OAuth2Client } = require("google-auth-library");
 
 // Helper function to generate JWT token
@@ -57,34 +58,7 @@ const buildUserResponse = async (user, token = "") => {
   const teamName = teamObj ? teamObj.name : "";
   const teamIdStr = teamObj ? teamObj.teamid : "";
 
-  const registeredEvents = rawRegistrations.map((reg) => {
-    const ev = reg.eventId || {};
-    const paymentIds = Array.isArray(reg.paymentId)
-      ? reg.paymentId.map((p) => (p && p._id ? p._id : p))
-      : [];
-
-    return {
-      _id: reg._id,
-      userId: reg.userId,
-      eventId: {
-        _id: ev._id,
-        title: ev.title || "",
-        description: ev.description || "",
-        registrationFee: ev.registrationFee || 0,
-        actualPrice: ev.registrationFee || 0,
-        image: ev.image || "",
-        location: ev.location || "",
-        date: ev.date || null,
-        timings: ev.timings || "",
-        minParticipants: ev.minParticipants || 1,
-        maxParticipants: ev.maxParticipants || 1,
-      },
-      paymentId: paymentIds,
-      participants: reg.participants || [],
-      createdAt: reg.createdAt,
-      updatedAt: reg.updatedAt,
-    };
-  });
+  const registeredEvents = rawRegistrations.map((reg) => formatRegistration(reg));
 
   return {
     _id: populatedUser._id,

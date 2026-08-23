@@ -29,59 +29,64 @@ const addEventsToRegistration = async (req, res) => {
       });
     }
 
-    const { eventId, eventIds, participants } = req.body;
+    const { eventId, eventIds, events, participants } = req.body;
 
+    // Parse bulk input events array or single eventId/eventIds
+    let bulkInputMap = new Map(); // eventId -> participants array
     let idsToAdd = [];
+
+    if (Array.isArray(events)) {
+      events.forEach((item) => {
+        const id = typeof item === "string" ? item : (item.eventId || item._id);
+        if (id) {
+          idsToAdd.push(id.toString());
+          let itemParticipants = [];
+          if (item.participants && Array.isArray(item.participants)) {
+            itemParticipants = item.participants.map((p) => ({
+              name: p && p.name ? String(p.name).trim() : (typeof p === "string" ? String(p).trim() : ""),
+              phone: p && p.phone ? String(p.phone).trim() : "",
+            }));
+          }
+          bulkInputMap.set(id.toString(), itemParticipants);
+        }
+      });
+    }
+
     if (eventId) {
-      idsToAdd.push(eventId);
+      idsToAdd.push(eventId.toString());
     }
     if (Array.isArray(eventIds)) {
-      idsToAdd = idsToAdd.concat(eventIds);
+      idsToAdd = idsToAdd.concat(eventIds.map((id) => id.toString()));
     }
+
+    idsToAdd = Array.from(new Set(idsToAdd)); // Unique event IDs
 
     if (idsToAdd.length === 0) {
       return res
         .status(400)
-        .json({ message: "Please provide eventId or eventIds in request body" });
+        .json({ message: "Please provide eventId, eventIds, or events array in request body" });
     }
 
-    // Process participants input [{ name, phone }]
-    let formattedParticipants = [];
+    // Default global participants if specified
+    let globalParticipants = [];
     if (Array.isArray(participants)) {
-      formattedParticipants = participants.map((p) => ({
+      globalParticipants = participants.map((p) => ({
         name: p && p.name ? String(p.name).trim() : (typeof p === "string" ? String(p).trim() : ""),
         phone: p && p.phone ? String(p.phone).trim() : "",
       }));
-    } else if (typeof participants === "string") {
-      try {
-        const parsed = JSON.parse(participants);
-        if (Array.isArray(parsed)) {
-          formattedParticipants = parsed.map((p) => ({
-            name: p && p.name ? String(p.name).trim() : (typeof p === "string" ? String(p).trim() : ""),
-            phone: p && p.phone ? String(p.phone).trim() : "",
-          }));
-        }
-      } catch (e) {}
-    } else if (req.body.name || req.body.phone) {
-      formattedParticipants = [
-        {
-          name: req.body.name ? String(req.body.name).trim() : "",
-          phone: req.body.phone ? String(req.body.phone).trim() : "",
-        },
-      ];
     }
 
-    // Default participants to team members or user if none provided
-    if (formattedParticipants.length === 0) {
+    // Default to user details if no participants provided
+    if (globalParticipants.length === 0) {
       const userObj = await User.findById(userId).populate("teamid");
       if (userObj && userObj.teamid) {
         const members = await User.find({ teamid: userObj.teamid._id });
-        formattedParticipants = members.map((m) => ({
+        globalParticipants = members.map((m) => ({
           name: m.name || "",
           phone: m.phone || "",
         }));
       } else if (userObj) {
-        formattedParticipants = [
+        globalParticipants = [
           {
             name: userObj.name || "",
             phone: userObj.phone || "",
@@ -96,9 +101,40 @@ const addEventsToRegistration = async (req, res) => {
       return res.status(404).json({ message: "No valid events found for provided IDs" });
     }
 
+    // Validate participant count against min/max participants for each event
+    const eventParticipantsMap = new Map();
+    for (const event of validEvents) {
+      const idStr = event._id.toString();
+      let eventParticipants = bulkInputMap.get(idStr);
+      if (!eventParticipants || eventParticipants.length === 0) {
+        eventParticipants = globalParticipants;
+      }
+
+      const min = event.minParticipants || 1;
+      const max = event.maxParticipants || 100;
+      const count = eventParticipants.length;
+
+      if (count < min) {
+        return res.status(400).json({
+          message: `Participant count (${count}) is less than the minimum required (${min}) for event '${event.title}'`,
+        });
+      }
+
+      if (count > max) {
+        return res.status(400).json({
+          message: `Participant count (${count}) exceeds the maximum allowed (${max}) for event '${event.title}'`,
+        });
+      }
+
+      eventParticipantsMap.set(idStr, eventParticipants);
+    }
+
     const registrations = [];
 
     for (const event of validEvents) {
+      const idStr = event._id.toString();
+      const eventParticipants = eventParticipantsMap.get(idStr) || [];
+
       let reg = await EventRegistration.findOne({
         userId,
         eventId: event._id,
@@ -109,10 +145,10 @@ const addEventsToRegistration = async (req, res) => {
           userId,
           eventId: event._id,
           paymentId: [],
-          participants: formattedParticipants,
+          participants: eventParticipants,
         });
       } else {
-        reg.participants = formattedParticipants;
+        reg.participants = eventParticipants;
         await reg.save();
       }
       registrations.push(reg);
@@ -131,6 +167,7 @@ const addEventsToRegistration = async (req, res) => {
       const paymentIds = Array.isArray(reg.paymentId)
         ? reg.paymentId.map((p) => (p && p._id ? p._id : p))
         : [];
+      const parts = reg.participants || [];
 
       return {
         _id: reg._id,
@@ -149,14 +186,16 @@ const addEventsToRegistration = async (req, res) => {
           maxParticipants: ev.maxParticipants || 1,
         },
         paymentId: paymentIds,
-        participants: reg.participants || [],
+        participantsCount: parts.length,
+        participants: parts,
         createdAt: reg.createdAt,
         updatedAt: reg.updatedAt,
       };
     });
 
     res.status(200).json({
-      message: "Events registered successfully",
+      message: `Successfully registered ${formattedRegistrations.length} event(s) in bulk`,
+      count: formattedRegistrations.length,
       registrations: formattedRegistrations,
     });
   } catch (error) {
