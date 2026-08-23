@@ -323,16 +323,28 @@ const getPaymentDetails = async (req, res) => {
       return res.status(404).json({ message: "Payment record not found" });
     }
 
-    // Find all event registrations associated with this paymentId
+    // Strictly find only event registrations sharing this exact paymentId
     const registrations = await EventRegistration.find({
       paymentId: paymentId,
     }).populate("eventId");
 
-    const events = registrations.map((r) => ({
-      registrationId: r._id,
-      event: r.eventId,
-      createdAt: r.createdAt,
-    }));
+    const events = registrations.map((r) => {
+      const ev = r.eventId || {};
+      return {
+        registrationId: r._id,
+        eventId: ev._id,
+        title: ev.title || "",
+        description: ev.description || "",
+        actualPrice: ev.registrationFee || 0,
+        registrationFee: ev.registrationFee || 0,
+        location: ev.location || "",
+        date: ev.date || null,
+        minParticipants: ev.minParticipants || 1,
+        maxParticipants: ev.maxParticipants || 1,
+        participants: r.participants || [],
+        createdAt: r.createdAt,
+      };
+    });
 
     const u = payment.user || {};
 
@@ -361,7 +373,8 @@ const getPaymentDetails = async (req, res) => {
       },
       college: u.college || null,
       team: u.teamid || null,
-      events: events.map((e) => e.event),
+      eventsCount: events.length,
+      events: events,
       associatedEvents: events,
     });
   } catch (error) {
