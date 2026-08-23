@@ -452,6 +452,91 @@ const updatePaymentStatusWithMessage = async (req, res) => {
   }
 };
 
+// @desc    Get registered events, actual price amount, and participants for a specific user
+// @route   GET /api/admin/user-events/:userId (also /api/admin/users/:userId/events)
+// @access  Private (Admin / Superadmin)
+const getUserEventsWithDetails = async (req, res) => {
+  try {
+    const userId = req.params.userId || req.params.id;
+
+    if (!userId) {
+      return res.status(400).json({ message: "Please provide userId" });
+    }
+
+    const user = await User.findById(userId)
+      .select("-password")
+      .populate("college")
+      .populate("teamid");
+
+    if (!user) {
+      return res.status(404).json({ message: "User not found" });
+    }
+
+    // Find all event registrations for this user
+    const registrations = await EventRegistration.find({ userId })
+      .populate("eventId")
+      .populate({
+        path: "paymentId",
+        populate: { path: "approvedBy", select: "name email role" },
+      });
+
+    // Find team members if user belongs to a team
+    let teamMembers = [];
+    if (user.teamid) {
+      teamMembers = await User.find({ teamid: user.teamid._id }).select(
+        "name email avatar collegeName"
+      );
+    } else {
+      teamMembers = [
+        {
+          _id: user._id,
+          name: user.name,
+          email: user.email,
+          avatar: user.avatar,
+          collegeName: user.collegeName,
+        },
+      ];
+    }
+
+    const eventsDetails = registrations.map((reg) => {
+      const ev = reg.eventId || {};
+      return {
+        registrationId: reg._id,
+        eventId: ev._id,
+        title: ev.title || "",
+        description: ev.description || "",
+        actualPrice: ev.registrationFee || 0,
+        registrationFee: ev.registrationFee || 0,
+        location: ev.location || "",
+        date: ev.date || null,
+        minParticipants: ev.minParticipants || 1,
+        maxParticipants: ev.maxParticipants || 1,
+        payments: reg.paymentId || [],
+        participants: teamMembers,
+        createdAt: reg.createdAt,
+        updatedAt: reg.updatedAt,
+      };
+    });
+
+    res.status(200).json({
+      user: {
+        _id: user._id,
+        name: user.name,
+        email: user.email,
+        avatar: user.avatar,
+        collegeName: user.collegeName,
+        college: user.college || null,
+      },
+      team: user.teamid || null,
+      totalEventsCount: eventsDetails.length,
+      events: eventsDetails,
+    });
+  } catch (error) {
+    console.error("Get User Events Error:", error);
+    res.status(500).json({ message: error.message });
+  }
+};
+
 module.exports = {
   loginAdmin,
   addAdmin,
@@ -465,6 +550,7 @@ module.exports = {
   getRecentPayments,
   getPaymentDetails,
   updatePaymentStatusWithMessage,
+  getUserEventsWithDetails,
 };
 
 
