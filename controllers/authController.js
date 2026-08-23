@@ -1,6 +1,8 @@
 const jwt = require("jsonwebtoken");
 const User = require("../models/User");
 const College = require("../models/College");
+const Team = require("../models/Team");
+const EventRegistration = require("../models/EventRegistrations");
 const { OAuth2Client } = require("google-auth-library");
 
 // Helper function to generate JWT token
@@ -40,6 +42,42 @@ const handleCollegeRegistration = async (collegeName) => {
   return college;
 };
 
+// Helper to build comprehensive user response object with team & registered events
+const buildUserResponse = async (user, token = "") => {
+  const populatedUser = await User.findById(user._id)
+    .select("-password")
+    .populate("college")
+    .populate("teamid");
+
+  const registrations = await EventRegistration.find({ userId: user._id })
+    .populate("eventId")
+    .populate("paymentId");
+
+  const teamObj = populatedUser.teamid || null;
+  const teamName = teamObj ? teamObj.name : "";
+  const teamIdStr = teamObj ? teamObj.teamid : "";
+
+  return {
+    _id: populatedUser._id,
+    name: populatedUser.name,
+    email: populatedUser.email,
+    role: populatedUser.role,
+    avatar: populatedUser.avatar,
+    googleId: populatedUser.googleId,
+    collegeId: populatedUser.college ? populatedUser.college._id : null,
+    college: populatedUser.college,
+    collegeName: populatedUser.collegeName,
+    teamid: teamObj ? teamObj._id : null,
+    team: teamObj,
+    teamName: teamName,
+    teamIdString: teamIdStr,
+    hasTeam: Boolean(teamObj),
+    registeredEvents: registrations,
+    registrations: registrations,
+    token: token || generateToken(populatedUser._id),
+  };
+};
+
 // @desc    Google OAuth Signup / Login
 // @route   POST /api/auth/google
 // @access  Public
@@ -58,7 +96,6 @@ const googleAuth = async (req, res) => {
     let googleId, email, name, picture;
 
     if (targetToken) {
-      // Verify ID Token sent from Frontend
       const ticket = await client.verifyIdToken({
         idToken: targetToken,
         audience: process.env.GOOGLE_CLIENT_ID,
@@ -70,7 +107,6 @@ const googleAuth = async (req, res) => {
       name = payload.name;
       picture = payload.picture;
     } else if (accessToken) {
-      // Verify Access Token via Google UserInfo API
       const response = await fetch("https://www.googleapis.com/oauth2/v3/userinfo", {
         headers: { Authorization: `Bearer ${accessToken}` },
       });
@@ -90,18 +126,15 @@ const googleAuth = async (req, res) => {
       return res.status(400).json({ message: "Could not retrieve email from Google" });
     }
 
-    // Find existing user by googleId or email
     let user = await User.findOne({ $or: [{ googleId }, { email }] }).populate("college");
 
     if (user) {
-      // LOGIN FLOW: User already registered
       if (!user.googleId) {
         user.googleId = googleId;
         if (!user.avatar && picture) user.avatar = picture;
         await user.save();
       }
     } else {
-      // SIGNUP FLOW: New User registration requires college selection & limit check
       let college;
       try {
         college = await handleCollegeRegistration(collegeName);
@@ -118,25 +151,15 @@ const googleAuth = async (req, res) => {
         collegeName: college.collegeName,
       });
 
-      // Populate college details on new user object
       user.college = college;
     }
 
-    // Generate backend JWT token
     const jwtToken = generateToken(user._id);
+    const userPayload = await buildUserResponse(user, jwtToken);
 
     res.status(200).json({
       message: "Google Authentication successful",
-      _id: user._id,
-      name: user.name,
-      email: user.email,
-      role: user.role,
-      avatar: user.avatar,
-      googleId: user.googleId,
-      collegeId: user.college ? user.college._id : null,
-      college: user.college,
-      collegeName: user.collegeName,
-      token: jwtToken,
+      ...userPayload,
     });
   } catch (error) {
     console.error("Google Auth Error:", error);
@@ -144,7 +167,7 @@ const googleAuth = async (req, res) => {
   }
 };
 
-// @desc    Register User with Email/Password (Optional fallback)
+// @desc    Register User with Email/Password
 // @route   POST /api/auth/register
 // @access  Public
 const registerUser = async (req, res) => {
@@ -178,16 +201,10 @@ const registerUser = async (req, res) => {
       collegeName: college.collegeName,
     });
 
-    res.status(201).json({
-      _id: user._id,
-      name: user.name,
-      email: user.email,
-      role: user.role,
-      collegeId: user.college,
-      college: college,
-      collegeName: user.collegeName,
-      token: generateToken(user._id),
-    });
+    const jwtToken = generateToken(user._id);
+    const userPayload = await buildUserResponse(user, jwtToken);
+
+    res.status(201).json(userPayload);
   } catch (error) {
     res.status(500).json({ message: error.message });
   }
@@ -204,20 +221,13 @@ const loginUser = async (req, res) => {
       return res.status(400).json({ message: "Please provide email and password" });
     }
 
-    const user = await User.findOne({ email }).populate("college");
+    const user = await User.findOne({ email });
 
     if (user && (await user.matchPassword(password))) {
-      res.json({
-        _id: user._id,
-        name: user.name,
-        email: user.email,
-        role: user.role,
-        avatar: user.avatar,
-        collegeId: user.college ? user.college._id : null,
-        college: user.college,
-        collegeName: user.collegeName,
-        token: generateToken(user._id),
-      });
+      const jwtToken = generateToken(user._id);
+      const userPayload = await buildUserResponse(user, jwtToken);
+
+      res.json(userPayload);
     } else {
       res.status(401).json({ message: "Invalid email or password" });
     }
@@ -226,50 +236,45 @@ const loginUser = async (req, res) => {
   }
 };
 
-// @desc    Get user profile
+// @desc    Get user profile (includes team, teamName, registeredEvents)
 // @route   GET /api/auth/me
 // @access  Private
 const getUserProfile = async (req, res) => {
   try {
-    const user = await User.findById(req.user._id).select("-password").populate("college");
-    if (user) {
-      res.json(user);
-    } else {
-      res.status(404).json({ message: "User not found" });
-    }
-  } catch (error) {
-    res.status(500).json({ message: error.message });
-  }
-};
-
-// @desc    Verify user token and return user data (same payload structure as login response)
-// @route   GET /api/auth/verifyuser
-// @access  Private
-const verifyUser = async (req, res) => {
-  try {
-    const user = await User.findById(req.user._id).select("-password").populate("college");
+    const user = await User.findById(req.user._id);
     if (!user) {
       return res.status(404).json({ message: "User not found" });
     }
 
-    // Retrieve token from Authorization header if present
     let token = "";
     if (req.headers.authorization && req.headers.authorization.startsWith("Bearer")) {
       token = req.headers.authorization.split(" ")[1];
     }
 
-    res.status(200).json({
-      _id: user._id,
-      name: user.name,
-      email: user.email,
-      role: user.role,
-      avatar: user.avatar,
-      googleId: user.googleId,
-      collegeId: user.college ? user.college._id : null,
-      college: user.college,
-      collegeName: user.collegeName,
-      token: token || generateToken(user._id),
-    });
+    const userPayload = await buildUserResponse(user, token);
+    res.status(200).json(userPayload);
+  } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
+};
+
+// @desc    Verify user token and return full user data (team, teamName, registeredEvents, etc.)
+// @route   GET /api/auth/verifyuser (and /api/auth/verifyUser, /api/auth/verify-user)
+// @access  Private
+const verifyUser = async (req, res) => {
+  try {
+    const user = await User.findById(req.user._id);
+    if (!user) {
+      return res.status(404).json({ message: "User not found" });
+    }
+
+    let token = "";
+    if (req.headers.authorization && req.headers.authorization.startsWith("Bearer")) {
+      token = req.headers.authorization.split(" ")[1];
+    }
+
+    const userPayload = await buildUserResponse(user, token);
+    res.status(200).json(userPayload);
   } catch (error) {
     res.status(500).json({ message: error.message });
   }
@@ -282,4 +287,3 @@ module.exports = {
   getUserProfile,
   verifyUser,
 };
-
