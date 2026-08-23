@@ -9,30 +9,45 @@ const protect = async (req, res, next) => {
     req.headers.authorization &&
     req.headers.authorization.startsWith("Bearer")
   ) {
-    try {
-      // Get token from header
-      token = req.headers.authorization.split(" ")[1];
+    token = req.headers.authorization.split(" ")[1];
+  } else if (req.headers.authorization) {
+    token = req.headers.authorization.trim();
+  }
 
+  if (token) {
+    try {
       // Verify token
       const decoded = jwt.verify(token, process.env.JWT_SECRET);
 
       // Get user from token payload (excluding password)
-      req.user = await User.findById(decoded.id).select("-password");
+      let user = await User.findById(decoded.id).select("-password");
 
-      if (!req.user) {
+      if (!user) {
+        // Fallback check in Admin model
+        const admin = await Admin.findById(decoded.id).select("-password");
+        if (admin) {
+          user = {
+            _id: admin._id,
+            name: admin.name,
+            email: admin.email,
+            role: admin.role || "admin",
+          };
+        }
+      }
+
+      if (!user) {
         return res.status(401).json({ message: "User not found" });
       }
 
-      next();
+      req.user = user;
+      return next();
     } catch (error) {
-      console.error(error);
+      console.error("Auth Middleware Error:", error.message);
       return res.status(401).json({ message: "Not authorized, token failed" });
     }
   }
 
-  if (!token) {
-    return res.status(401).json({ message: "Not authorized, no token provided" });
-  }
+  return res.status(401).json({ message: "Not authorized, no token provided" });
 };
 
 const adminOnly = (req, res, next) => {

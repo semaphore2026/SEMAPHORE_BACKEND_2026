@@ -49,16 +49,16 @@ const addEventsToRegistration = async (req, res) => {
     let formattedParticipants = [];
     if (Array.isArray(participants)) {
       formattedParticipants = participants.map((p) => ({
-        name: p.name ? String(p.name).trim() : "",
-        phone: p.phone ? String(p.phone).trim() : "",
+        name: p && p.name ? String(p.name).trim() : (typeof p === "string" ? String(p).trim() : ""),
+        phone: p && p.phone ? String(p.phone).trim() : "",
       }));
     } else if (typeof participants === "string") {
       try {
         const parsed = JSON.parse(participants);
         if (Array.isArray(parsed)) {
           formattedParticipants = parsed.map((p) => ({
-            name: p.name ? String(p.name).trim() : "",
-            phone: p.phone ? String(p.phone).trim() : "",
+            name: p && p.name ? String(p.name).trim() : (typeof p === "string" ? String(p).trim() : ""),
+            phone: p && p.phone ? String(p.phone).trim() : "",
           }));
         }
       } catch (e) {}
@@ -69,6 +69,25 @@ const addEventsToRegistration = async (req, res) => {
           phone: req.body.phone ? String(req.body.phone).trim() : "",
         },
       ];
+    }
+
+    // Default participants to team members or user if none provided
+    if (formattedParticipants.length === 0) {
+      const userObj = await User.findById(userId).populate("teamid");
+      if (userObj && userObj.teamid) {
+        const members = await User.find({ teamid: userObj.teamid._id });
+        formattedParticipants = members.map((m) => ({
+          name: m.name || "",
+          phone: m.phone || "",
+        }));
+      } else if (userObj) {
+        formattedParticipants = [
+          {
+            name: userObj.name || "",
+            phone: userObj.phone || "",
+          },
+        ];
+      }
     }
 
     // Verify all event IDs exist
@@ -93,10 +112,8 @@ const addEventsToRegistration = async (req, res) => {
           participants: formattedParticipants,
         });
       } else {
-        if (formattedParticipants.length > 0) {
-          reg.participants = formattedParticipants;
-          await reg.save();
-        }
+        reg.participants = formattedParticipants;
+        await reg.save();
       }
       registrations.push(reg);
     }

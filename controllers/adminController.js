@@ -588,8 +588,12 @@ const getEventParticipantsByEventAndUser = async (req, res) => {
       ];
     }
 
+    const eventParticipants = registration && registration.participants ? registration.participants : [];
+
     res.status(200).json({
       registrationId: registration ? registration._id : null,
+      eventId: event._id,
+      userId: user._id,
       event: {
         _id: event._id,
         title: event.title,
@@ -611,13 +615,12 @@ const getEventParticipantsByEventAndUser = async (req, res) => {
       },
       college: user.college || null,
       team: user.teamid || null,
-      eventParticipants: registration ? registration.participants || [] : [],
-      participants: registration && registration.participants && registration.participants.length > 0
-        ? registration.participants
-        : teamMembers,
-      teamMembers,
+      participantsCount: eventParticipants.length,
+      participants: eventParticipants,
+      teamMembers: teamMembers,
       payments: registration ? registration.paymentId : [],
       createdAt: registration ? registration.createdAt : null,
+      updatedAt: registration ? registration.updatedAt : null,
     });
   } catch (error) {
     console.error("Get Event Participants Error:", error);
