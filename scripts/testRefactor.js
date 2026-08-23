@@ -25,7 +25,7 @@ if (!userSchemaKeys.includes("teamid")) {
 // Check Payment model schema
 const paymentSchemaKeys = Object.keys(Payment.schema.paths);
 console.log("Payment schema fields:", paymentSchemaKeys);
-const requiredPaymentFields = ["amount", "utr", "imageUrl", "timestamp", "status", "message", "user"];
+const requiredPaymentFields = ["amount", "utr", "imageUrl", "timestamp", "status", "message", "user", "approvedBy"];
 const missingPaymentFields = requiredPaymentFields.filter((f) => !paymentSchemaKeys.includes(f));
 if (missingPaymentFields.length > 0) {
   console.error("FAILED: Payment schema missing fields:", missingPaymentFields);

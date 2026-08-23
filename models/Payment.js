@@ -35,6 +35,11 @@ const paymentSchema = new mongoose.Schema(
       trim: true,
       default: "",
     },
+    approvedBy: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "Admin",
+      default: null,
+    },
   },
   {
     timestamps: true,
@@ -43,9 +48,14 @@ const paymentSchema = new mongoose.Schema(
   }
 );
 
-// Virtual alias for imageurl (lowercase) for API consumers expecting imageurl
+// Virtual alias for imageurl (lowercase)
 paymentSchema.virtual("imageurl").get(function () {
   return this.imageUrl;
+});
+
+// Virtual alias for approved_by (snake_case)
+paymentSchema.virtual("approved_by").get(function () {
+  return this.approvedBy;
 });
 
 const Payment = mongoose.model("Payment", paymentSchema);

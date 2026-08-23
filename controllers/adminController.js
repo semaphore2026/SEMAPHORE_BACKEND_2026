@@ -247,7 +247,7 @@ const deleteUser = async (req, res) => {
 
 // ================= ADMIN PAYMENT MANAGEMENT CONTROLLERS =================
 
-// @desc    Get recent payments (amount, utr, imageurl, status, message)
+// @desc    Get recent payments (amount, utr, imageurl, paymentid, status, message, approvedBy, user, college, team)
 // @route   GET /api/admin/recent-payments
 // @access  Private (Admin / Superadmin)
 const getRecentPayments = async (req, res) => {
@@ -255,24 +255,39 @@ const getRecentPayments = async (req, res) => {
     const payments = await Payment.find()
       .populate({
         path: "user",
-        select: "name email collegeName avatar teamid",
-        populate: { path: "teamid" },
+        select: "name email collegeName avatar college teamid",
+        populate: [{ path: "teamid" }, { path: "college" }],
       })
+      .populate("approvedBy", "name email role")
       .sort({ createdAt: -1 });
 
-    const formattedPayments = payments.map((p) => ({
-      _id: p._id,
-      user: p.user,
-      amount: p.amount,
-      utr: p.utr,
-      imageUrl: p.imageUrl,
-      imageurl: p.imageUrl,
-      timestamp: p.timestamp || p.createdAt,
-      status: p.status,
-      message: p.message || "",
-      createdAt: p.createdAt,
-      updatedAt: p.updatedAt,
-    }));
+    const formattedPayments = payments.map((p) => {
+      const u = p.user || {};
+      return {
+        paymentid: p._id,
+        _id: p._id,
+        amount: p.amount,
+        utr: p.utr,
+        imageUrl: p.imageUrl,
+        imageurl: p.imageUrl,
+        status: p.status,
+        message: p.message || "",
+        approvedBy: p.approvedBy || null,
+        approved_by: p.approvedBy || null,
+        timestamp: p.timestamp || p.createdAt,
+        createdAt: p.createdAt,
+        updatedAt: p.updatedAt,
+        user: {
+          _id: u._id,
+          name: u.name,
+          email: u.email,
+          avatar: u.avatar,
+          collegeName: u.collegeName,
+          college: u.college || null,
+          team: u.teamid || null,
+        },
+      };
+    });
 
     res.status(200).json({
       count: formattedPayments.length,
@@ -284,7 +299,7 @@ const getRecentPayments = async (req, res) => {
   }
 };
 
-// @desc    View details by payment ID (returns events associated with that payment ID)
+// @desc    Fetch event details, user details, college details, and team details by payment ID
 // @route   GET /api/admin/payment-details/:paymentId
 // @access  Private (Admin / Superadmin)
 const getPaymentDetails = async (req, res) => {
@@ -295,11 +310,13 @@ const getPaymentDetails = async (req, res) => {
       return res.status(400).json({ message: "Please provide paymentId" });
     }
 
-    const payment = await Payment.findById(paymentId).populate({
-      path: "user",
-      select: "name email collegeName avatar teamid",
-      populate: { path: "teamid" },
-    });
+    const payment = await Payment.findById(paymentId)
+      .populate({
+        path: "user",
+        select: "name email collegeName avatar college teamid",
+        populate: [{ path: "teamid" }, { path: "college" }],
+      })
+      .populate("approvedBy", "name email role");
 
     if (!payment) {
       return res.status(404).json({ message: "Payment record not found" });
@@ -310,27 +327,41 @@ const getPaymentDetails = async (req, res) => {
       paymentId: paymentId,
     }).populate("eventId");
 
-    const associatedEvents = registrations.map((r) => ({
+    const events = registrations.map((r) => ({
       registrationId: r._id,
       event: r.eventId,
       createdAt: r.createdAt,
     }));
 
+    const u = payment.user || {};
+
     res.status(200).json({
       payment: {
+        paymentid: payment._id,
         _id: payment._id,
-        user: payment.user,
         amount: payment.amount,
         utr: payment.utr,
         imageUrl: payment.imageUrl,
         imageurl: payment.imageUrl,
-        timestamp: payment.timestamp || payment.createdAt,
         status: payment.status,
         message: payment.message || "",
+        approvedBy: payment.approvedBy || null,
+        approved_by: payment.approvedBy || null,
+        timestamp: payment.timestamp || payment.createdAt,
         createdAt: payment.createdAt,
         updatedAt: payment.updatedAt,
       },
-      associatedEvents,
+      user: {
+        _id: u._id,
+        name: u.name,
+        email: u.email,
+        avatar: u.avatar,
+        collegeName: u.collegeName,
+      },
+      college: u.college || null,
+      team: u.teamid || null,
+      events: events.map((e) => e.event),
+      associatedEvents: events,
     });
   } catch (error) {
     console.error("Get Payment Details Error:", error);
@@ -338,14 +369,17 @@ const getPaymentDetails = async (req, res) => {
   }
 };
 
-// @desc    Approve or Reject payment with message
+// @desc    Approve or Reject payment with message (tracks adminId in approvedBy)
 // @route   POST /api/admin/payment-status (also PUT /api/admin/payments/:paymentId/status)
 // @access  Private (Admin / Superadmin)
 const updatePaymentStatusWithMessage = async (req, res) => {
   try {
-    const paymentId = req.params.paymentId || req.params.id || req.body.paymentId;
+    const paymentId = req.params.paymentId || req.params.id || req.body.paymentId || req.body.paymentid;
     const { status, message, paymentStatus } = req.body;
     const targetStatus = status || paymentStatus;
+
+    // Retrieve admin ID from JWT token payload (set by adminAuthMiddleware or protectAnyAdmin)
+    const adminId = req.admin ? req.admin._id : (req.user ? req.user._id : null);
 
     if (!paymentId) {
       return res.status(400).json({ message: "Please provide paymentId" });
@@ -371,19 +405,34 @@ const updatePaymentStatusWithMessage = async (req, res) => {
     if (message !== undefined) {
       payment.message = String(message).trim();
     }
+    if (adminId) {
+      payment.approvedBy = adminId;
+    }
     await payment.save();
 
-    const updatedPayment = await Payment.findById(payment._id).populate({
-      path: "user",
-      select: "name email collegeName avatar teamid",
-      populate: { path: "teamid" },
-    });
+    const updatedPayment = await Payment.findById(payment._id)
+      .populate({
+        path: "user",
+        select: "name email collegeName avatar college teamid",
+        populate: [{ path: "teamid" }, { path: "college" }],
+      })
+      .populate("approvedBy", "name email role");
+
+    const u = updatedPayment.user || {};
 
     res.status(200).json({
       message: `Payment status updated to '${normalizedStatus}' successfully`,
       payment: {
+        paymentid: updatedPayment._id,
         _id: updatedPayment._id,
-        user: updatedPayment.user,
+        user: {
+          _id: u._id,
+          name: u.name,
+          email: u.email,
+          collegeName: u.collegeName,
+          college: u.college || null,
+          team: u.teamid || null,
+        },
         amount: updatedPayment.amount,
         utr: updatedPayment.utr,
         imageUrl: updatedPayment.imageUrl,
@@ -391,6 +440,8 @@ const updatePaymentStatusWithMessage = async (req, res) => {
         timestamp: updatedPayment.timestamp,
         status: updatedPayment.status,
         message: updatedPayment.message,
+        approvedBy: updatedPayment.approvedBy || null,
+        approved_by: updatedPayment.approvedBy || null,
         createdAt: updatedPayment.createdAt,
         updatedAt: updatedPayment.updatedAt,
       },
@@ -415,4 +466,5 @@ module.exports = {
   getPaymentDetails,
   updatePaymentStatusWithMessage,
 };
+
 
