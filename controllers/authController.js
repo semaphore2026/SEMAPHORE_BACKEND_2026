@@ -283,7 +283,16 @@ const verifyUser = async (req, res) => {
     }
 
     const userPayload = await buildUserResponse(user, token);
-    res.status(200).json(userPayload);
+    res.status(200).json({
+      success: true,
+      user: userPayload,
+      registeredEvents: userPayload.registeredEvents || [],
+      registrations: userPayload.registrations || [],
+      registration: {
+        events: userPayload.registeredEvents || [],
+      },
+      ...userPayload,
+    });
   } catch (error) {
     res.status(500).json({ message: error.message });
   }
