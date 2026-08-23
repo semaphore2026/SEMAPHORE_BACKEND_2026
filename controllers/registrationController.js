@@ -1,6 +1,8 @@
 const EventRegistration = require("../models/EventRegistrations");
 const Payment = require("../models/Payment");
 const Event = require("../models/Event");
+const User = require("../models/User");
+const College = require("../models/College");
 
 // @desc    Add event(s) to user's registration with participants validation
 // @route   POST /api/registrations/events
@@ -339,79 +341,52 @@ const getAllRegistrations = async (req, res) => {
   }
 };
 
-// @desc    Get pending payments (amount paid & UTR submitted by users, pending review)
+// @desc    Get total pending payments amount (submitted UTR/screenshot, pending review)
 // @route   GET /api/registrations/payments/pending
-// @route   GET /api/registrations/pending-payments
-// @route   GET /api/admin/payments/pending
-// @route   GET /api/admin/pending-payments
 // @access  Private (Admin Only)
 const getPendingPayments = async (req, res) => {
   try {
-    const isAdmin =
-      (req.user && req.user.role === "admin") ||
-      (req.admin && (req.admin.role === "admin" || req.admin.role === "superadmin"));
-
-    if (!isAdmin) {
-      return res.status(403).json({
-        message: "Unauthorized: Access denied. Admin privileges required.",
-      });
-    }
-
     const pendingPayments = await Payment.find({
       status: { $in: ["pending", "submitted"] },
-    })
-      .populate("user", "name email phone collegeName avatar")
-      .sort({ createdAt: -1 });
+    }).select("amount");
 
-    const totalAmount = pendingPayments.reduce(
+    const totalPendingAmount = pendingPayments.reduce(
       (sum, p) => sum + (p.amount || 0),
       0
     );
 
-    const paymentIds = pendingPayments.map((p) => p._id);
-    const registrations = await EventRegistration.find({
-      "events.paymentId": { $in: paymentIds },
-    }).populate("events.eventId", "title registrationFee date location");
-
-    const paymentsWithEvents = pendingPayments.map((payment) => {
-      const pObj = payment.toObject();
-      const userReg = registrations.find(
-        (r) => r.userId && r.userId.toString() === payment.user?._id?.toString()
-      );
-      if (userReg) {
-        pObj.events = userReg.events
-          .filter(
-            (e) => e.paymentId && e.paymentId.toString() === payment._id.toString()
-          )
-          .map((e) => e.eventId);
-      } else {
-        pObj.events = [];
-      }
-      return pObj;
-    });
-
-    res.status(200).json({
-      success: true,
-      message: "Pending payments retrieved successfully",
-      status: "pending",
-      count: pendingPayments.length,
-      totalPendingAmount: totalAmount,
-      totalAmount: totalAmount,
-      payments: paymentsWithEvents,
-    });
+    res.status(200).json({ totalPendingAmount });
   } catch (error) {
     console.error("Get Pending Payments Error:", error);
     res.status(500).json({ message: error.message });
   }
 };
 
-// @desc    Get approved payments (amount received and approved/verified)
+// @desc    Get total approved payments amount (received & approved/verified)
 // @route   GET /api/registrations/payments/approved
-// @route   GET /api/registrations/approved-payments
-// @route   GET /api/admin/payments/approved
-// @route   GET /api/admin/approved-payments
 // @access  Private (Admin Only)
 const getApprovedPayments = async (req, res) => {
+  try {
+    const approvedPayments = await Payment.find({
+      status: { $in: ["approved", "verified"] },
+    }).select("amount");
+
+    const totalApprovedAmount = approvedPayments.reduce(
+      (sum, p) => sum + (p.amount || 0),
+      0
+    );
+
+    res.status(200).json({ totalApprovedAmount });
+  } catch (error) {
+    console.error("Get Approved Payments Error:", error);
+    res.status(500).json({ message: error.message });
+  }
+};
+
+// @desc    Get overall stats (total registered users, total teams across colleges, college breakdown, payment summary)
+// @route   GET /api/registrations/stats
+// @access  Private (Admin Only)
+const getRegistrationStats = async (req, res) => {
   try {
     const isAdmin =
       (req.user && req.user.role === "admin") ||
@@ -423,50 +398,81 @@ const getApprovedPayments = async (req, res) => {
       });
     }
 
-    const approvedPayments = await Payment.find({
-      status: { $in: ["approved", "verified"] },
-    })
-      .populate("user", "name email phone collegeName avatar")
-      .sort({ createdAt: -1 });
+    // Total registered users (excluding admin role)
+    const totalUsers = await User.countDocuments({ role: { $ne: "admin" } });
 
-    const totalAmount = approvedPayments.reduce(
+    // Fetch all colleges and calculate total teams across all colleges
+    const colleges = await College.find().sort({ collegeName: 1 });
+    const totalTeams = colleges.reduce(
+      (sum, col) => sum + (col.totalTeams || 0),
+      0
+    );
+
+    // Payment summary
+    const pendingPayments = await Payment.find({
+      status: { $in: ["pending", "submitted"] },
+    });
+    const totalPendingAmount = pendingPayments.reduce(
       (sum, p) => sum + (p.amount || 0),
       0
     );
 
-    const paymentIds = approvedPayments.map((p) => p._id);
-    const registrations = await EventRegistration.find({
-      "events.paymentId": { $in: paymentIds },
-    }).populate("events.eventId", "title registrationFee date location");
-
-    const paymentsWithEvents = approvedPayments.map((payment) => {
-      const pObj = payment.toObject();
-      const userReg = registrations.find(
-        (r) => r.userId && r.userId.toString() === payment.user?._id?.toString()
-      );
-      if (userReg) {
-        pObj.events = userReg.events
-          .filter(
-            (e) => e.paymentId && e.paymentId.toString() === payment._id.toString()
-          )
-          .map((e) => e.eventId);
-      } else {
-        pObj.events = [];
-      }
-      return pObj;
+    const approvedPayments = await Payment.find({
+      status: { $in: ["approved", "verified"] },
     });
+    const totalApprovedAmount = approvedPayments.reduce(
+      (sum, p) => sum + (p.amount || 0),
+      0
+    );
 
     res.status(200).json({
       success: true,
-      message: "Approved payments retrieved successfully",
-      status: "approved",
-      count: approvedPayments.length,
-      totalApprovedAmount: totalAmount,
-      totalAmount: totalAmount,
-      payments: paymentsWithEvents,
+      message: "Registration and team statistics retrieved successfully",
+      totalUsers,
+      totalTeams,
+      totalColleges: colleges.length,
+      paymentsSummary: {
+        pendingCount: pendingPayments.length,
+        totalPendingAmount,
+        approvedCount: approvedPayments.length,
+        totalApprovedAmount,
+      },
+      colleges: colleges.map((c) => ({
+        _id: c._id,
+        collegeName: c.collegeName,
+        totalTeams: c.totalTeams,
+      })),
     });
   } catch (error) {
-    console.error("Get Approved Payments Error:", error);
+    console.error("Get Registration Stats Error:", error);
+    res.status(500).json({ message: error.message });
+  }
+};
+
+// @desc    Get total number of registered users
+// @route   GET /api/registrations/total-users
+// @access  Private (Admin Only)
+const getTotalUsers = async (req, res) => {
+  try {
+    const totalUsers = await User.countDocuments({ role: { $ne: "admin" } });
+    res.status(200).json({ totalUsers });
+  } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
+};
+
+// @desc    Get total count of teams across all colleges
+// @route   GET /api/registrations/total-teams
+// @access  Private (Admin Only)
+const getTotalTeams = async (req, res) => {
+  try {
+    const colleges = await College.find();
+    const totalTeams = colleges.reduce(
+      (sum, col) => sum + (col.totalTeams || 0),
+      0
+    );
+    res.status(200).json({ totalTeams });
+  } catch (error) {
     res.status(500).json({ message: error.message });
   }
 };
@@ -479,5 +485,9 @@ module.exports = {
   getAllRegistrations,
   getPendingPayments,
   getApprovedPayments,
+  getRegistrationStats,
+  getTotalUsers,
+  getTotalTeams,
 };
+
 

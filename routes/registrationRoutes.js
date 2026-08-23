@@ -11,6 +11,9 @@ const {
   getAllRegistrations,
   getPendingPayments,
   getApprovedPayments,
+  getRegistrationStats,
+  getTotalUsers,
+  getTotalTeams,
 } = require("../controllers/registrationController");
 const { protect } = require("../middleware/authMiddleware");
 const { upload } = require("../config/cloudinary");
@@ -63,7 +66,10 @@ router.get("/user", protect, getUserRegistrations); // Alias route
 router.post("/payment", protect, upload.any(), makePayment);
 router.post("/pay", protect, upload.any(), makePayment); // Alias route
 
-// Admin Payment Stats / List Routes (Requires Admin JWT header)
+// Admin Payment & Registration Analytics Routes (Requires Admin JWT header)
+router.get("/total-users", protectAnyAdmin, getTotalUsers);
+router.get("/total-teams", protectAnyAdmin, getTotalTeams);
+router.get("/stats", protectAnyAdmin, getRegistrationStats);
 router.get("/payments/pending", protectAnyAdmin, getPendingPayments);
 router.get("/payments/approved", protectAnyAdmin, getApprovedPayments);
 
