@@ -339,10 +339,145 @@ const getAllRegistrations = async (req, res) => {
   }
 };
 
+// @desc    Get pending payments (amount paid & UTR submitted by users, pending review)
+// @route   GET /api/registrations/payments/pending
+// @route   GET /api/registrations/pending-payments
+// @route   GET /api/admin/payments/pending
+// @route   GET /api/admin/pending-payments
+// @access  Private (Admin Only)
+const getPendingPayments = async (req, res) => {
+  try {
+    const isAdmin =
+      (req.user && req.user.role === "admin") ||
+      (req.admin && (req.admin.role === "admin" || req.admin.role === "superadmin"));
+
+    if (!isAdmin) {
+      return res.status(403).json({
+        message: "Unauthorized: Access denied. Admin privileges required.",
+      });
+    }
+
+    const pendingPayments = await Payment.find({
+      status: { $in: ["pending", "submitted"] },
+    })
+      .populate("user", "name email phone collegeName avatar")
+      .sort({ createdAt: -1 });
+
+    const totalAmount = pendingPayments.reduce(
+      (sum, p) => sum + (p.amount || 0),
+      0
+    );
+
+    const paymentIds = pendingPayments.map((p) => p._id);
+    const registrations = await EventRegistration.find({
+      "events.paymentId": { $in: paymentIds },
+    }).populate("events.eventId", "title registrationFee date location");
+
+    const paymentsWithEvents = pendingPayments.map((payment) => {
+      const pObj = payment.toObject();
+      const userReg = registrations.find(
+        (r) => r.userId && r.userId.toString() === payment.user?._id?.toString()
+      );
+      if (userReg) {
+        pObj.events = userReg.events
+          .filter(
+            (e) => e.paymentId && e.paymentId.toString() === payment._id.toString()
+          )
+          .map((e) => e.eventId);
+      } else {
+        pObj.events = [];
+      }
+      return pObj;
+    });
+
+    res.status(200).json({
+      success: true,
+      message: "Pending payments retrieved successfully",
+      status: "pending",
+      count: pendingPayments.length,
+      totalPendingAmount: totalAmount,
+      totalAmount: totalAmount,
+      payments: paymentsWithEvents,
+    });
+  } catch (error) {
+    console.error("Get Pending Payments Error:", error);
+    res.status(500).json({ message: error.message });
+  }
+};
+
+// @desc    Get approved payments (amount received and approved/verified)
+// @route   GET /api/registrations/payments/approved
+// @route   GET /api/registrations/approved-payments
+// @route   GET /api/admin/payments/approved
+// @route   GET /api/admin/approved-payments
+// @access  Private (Admin Only)
+const getApprovedPayments = async (req, res) => {
+  try {
+    const isAdmin =
+      (req.user && req.user.role === "admin") ||
+      (req.admin && (req.admin.role === "admin" || req.admin.role === "superadmin"));
+
+    if (!isAdmin) {
+      return res.status(403).json({
+        message: "Unauthorized: Access denied. Admin privileges required.",
+      });
+    }
+
+    const approvedPayments = await Payment.find({
+      status: { $in: ["approved", "verified"] },
+    })
+      .populate("user", "name email phone collegeName avatar")
+      .sort({ createdAt: -1 });
+
+    const totalAmount = approvedPayments.reduce(
+      (sum, p) => sum + (p.amount || 0),
+      0
+    );
+
+    const paymentIds = approvedPayments.map((p) => p._id);
+    const registrations = await EventRegistration.find({
+      "events.paymentId": { $in: paymentIds },
+    }).populate("events.eventId", "title registrationFee date location");
+
+    const paymentsWithEvents = approvedPayments.map((payment) => {
+      const pObj = payment.toObject();
+      const userReg = registrations.find(
+        (r) => r.userId && r.userId.toString() === payment.user?._id?.toString()
+      );
+      if (userReg) {
+        pObj.events = userReg.events
+          .filter(
+            (e) => e.paymentId && e.paymentId.toString() === payment._id.toString()
+          )
+          .map((e) => e.eventId);
+      } else {
+        pObj.events = [];
+      }
+      return pObj;
+    });
+
+    res.status(200).json({
+      success: true,
+      message: "Approved payments retrieved successfully",
+      status: "approved",
+      count: approvedPayments.length,
+      totalApprovedAmount: totalAmount,
+      totalAmount: totalAmount,
+      payments: paymentsWithEvents,
+    });
+  } catch (error) {
+    console.error("Get Approved Payments Error:", error);
+    res.status(500).json({ message: error.message });
+  }
+};
+
 module.exports = {
   addEventsToRegistration,
   getUserRegistrations,
   makePayment,
   updatePaymentStatus,
   getAllRegistrations,
+  getPendingPayments,
+  getApprovedPayments,
 };
+
