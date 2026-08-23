@@ -611,8 +611,11 @@ const getEventParticipantsByEventAndUser = async (req, res) => {
       },
       college: user.college || null,
       team: user.teamid || null,
-      participantsCount: teamMembers.length,
-      participants: teamMembers,
+      eventParticipants: registration ? registration.participants || [] : [],
+      participants: registration && registration.participants && registration.participants.length > 0
+        ? registration.participants
+        : teamMembers,
+      teamMembers,
       payments: registration ? registration.paymentId : [],
       createdAt: registration ? registration.createdAt : null,
     });
@@ -703,6 +706,7 @@ const getUserFullDetailsForAdmin = async (req, res) => {
         coordinators: ev.coordinators || [],
         minParticipants: ev.minParticipants || 1,
         maxParticipants: ev.maxParticipants || 1,
+        participants: reg.participants || [],
         payments: reg.paymentId || [],
         createdAt: reg.createdAt,
         updatedAt: reg.updatedAt,

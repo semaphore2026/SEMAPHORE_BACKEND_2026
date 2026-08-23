@@ -29,7 +29,7 @@ const addEventsToRegistration = async (req, res) => {
       });
     }
 
-    const { eventId, eventIds } = req.body;
+    const { eventId, eventIds, participants } = req.body;
 
     let idsToAdd = [];
     if (eventId) {
@@ -43,6 +43,32 @@ const addEventsToRegistration = async (req, res) => {
       return res
         .status(400)
         .json({ message: "Please provide eventId or eventIds in request body" });
+    }
+
+    // Process participants input [{ name, phone }]
+    let formattedParticipants = [];
+    if (Array.isArray(participants)) {
+      formattedParticipants = participants.map((p) => ({
+        name: p.name ? String(p.name).trim() : "",
+        phone: p.phone ? String(p.phone).trim() : "",
+      }));
+    } else if (typeof participants === "string") {
+      try {
+        const parsed = JSON.parse(participants);
+        if (Array.isArray(parsed)) {
+          formattedParticipants = parsed.map((p) => ({
+            name: p.name ? String(p.name).trim() : "",
+            phone: p.phone ? String(p.phone).trim() : "",
+          }));
+        }
+      } catch (e) {}
+    } else if (req.body.name || req.body.phone) {
+      formattedParticipants = [
+        {
+          name: req.body.name ? String(req.body.name).trim() : "",
+          phone: req.body.phone ? String(req.body.phone).trim() : "",
+        },
+      ];
     }
 
     // Verify all event IDs exist
@@ -64,7 +90,13 @@ const addEventsToRegistration = async (req, res) => {
           userId,
           eventId: event._id,
           paymentId: [],
+          participants: formattedParticipants,
         });
+      } else {
+        if (formattedParticipants.length > 0) {
+          reg.participants = formattedParticipants;
+          await reg.save();
+        }
       }
       registrations.push(reg);
     }
@@ -151,7 +183,26 @@ const makePayment = async (req, res) => {
       });
     }
 
-    const { amount, utr, eventId, eventIds } = req.body;
+    const { amount, utr, eventId, eventIds, participants } = req.body;
+
+    // Process participants input [{ name, phone }] if sent with payment
+    let formattedParticipants = [];
+    if (Array.isArray(participants)) {
+      formattedParticipants = participants.map((p) => ({
+        name: p.name ? String(p.name).trim() : "",
+        phone: p.phone ? String(p.phone).trim() : "",
+      }));
+    } else if (typeof participants === "string") {
+      try {
+        const parsed = JSON.parse(participants);
+        if (Array.isArray(parsed)) {
+          formattedParticipants = parsed.map((p) => ({
+            name: p.name ? String(p.name).trim() : "",
+            phone: p.phone ? String(p.phone).trim() : "",
+          }));
+        }
+      } catch (e) {}
+    }
 
     // Collect event IDs for this payment
     let targetEventIds = [];
@@ -211,13 +262,17 @@ const makePayment = async (req, res) => {
           userId,
           eventId: event._id,
           paymentId: [payment._id],
+          participants: formattedParticipants,
         });
       } else {
         // Append payment._id if not present
         if (!reg.paymentId.some((pid) => pid.toString() === payment._id.toString())) {
           reg.paymentId.push(payment._id);
-          await reg.save();
         }
+        if (formattedParticipants.length > 0) {
+          reg.participants = formattedParticipants;
+        }
+        await reg.save();
       }
 
       updatedRegistrations.push(reg);

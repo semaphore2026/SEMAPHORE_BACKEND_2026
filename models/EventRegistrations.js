@@ -18,6 +18,12 @@ const eventRegistrationSchema = new mongoose.Schema(
         ref: "Payment",
       },
     ],
+    participants: [
+      {
+        name: { type: String, trim: true, default: "" },
+        phone: { type: String, trim: true, default: "" },
+      },
+    ],
   },
   {
     timestamps: true,
