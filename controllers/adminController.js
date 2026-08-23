@@ -1,3 +1,4 @@
+const mongoose = require("mongoose");
 const Admin = require("../models/Admin");
 const User = require("../models/User");
 const College = require("../models/College");
@@ -323,30 +324,82 @@ const getPaymentDetails = async (req, res) => {
       return res.status(404).json({ message: "Payment record not found" });
     }
 
-    // Strictly find only event registrations sharing this exact paymentId
-    const registrations = await EventRegistration.find({
-      paymentId: paymentId,
-    }).populate("eventId");
+    const u = payment.user || {};
+    const userId = u._id;
 
-    const events = registrations.map((r) => {
-      const ev = r.eventId || {};
-      return {
-        registrationId: r._id,
-        eventId: ev._id,
-        title: ev.title || "",
-        description: ev.description || "",
-        actualPrice: ev.registrationFee || 0,
-        registrationFee: ev.registrationFee || 0,
-        location: ev.location || "",
-        date: ev.date || null,
-        minParticipants: ev.minParticipants || 1,
-        maxParticipants: ev.maxParticipants || 1,
-        participants: r.participants || [],
-        createdAt: r.createdAt,
-      };
+    // Collect possible query IDs for paymentId (string & ObjectId)
+    const targetPaymentIdStr = paymentId.toString();
+    const paymentObjIdStr = payment._id ? payment._id.toString() : targetPaymentIdStr;
+
+    const queryIds = [paymentId];
+    if (payment._id) queryIds.push(payment._id);
+    if (mongoose.Types.ObjectId.isValid(paymentId)) {
+      queryIds.push(new mongoose.Types.ObjectId(paymentId));
+    }
+
+    // Find all event registrations matching either the paymentId or belonging to the payment's user
+    const findConditions = [{ paymentId: { $in: queryIds } }];
+    if (userId) {
+      findConditions.push({ userId: userId });
+    }
+
+    const rawRegistrations = await EventRegistration.find({
+      $or: findConditions,
+    })
+      .populate("eventId")
+      .populate("paymentId");
+
+    // Strictly filter to registrations that share this exact paymentId
+    const matchingRegistrations = rawRegistrations.filter((reg) => {
+      if (!reg || !reg.paymentId) return false;
+      const pList = Array.isArray(reg.paymentId) ? reg.paymentId : [reg.paymentId];
+      return pList.some((p) => {
+        if (!p) return false;
+        const pid = p._id ? p._id.toString() : p.toString();
+        return pid === targetPaymentIdStr || pid === paymentObjIdStr;
+      });
     });
 
-    const u = payment.user || {};
+    const events = matchingRegistrations.map((r) => {
+      const ev = r.eventId || {};
+      const isEvObj = typeof ev === "object" && ev !== null && ev._id;
+
+      const pList = Array.isArray(r.paymentId)
+        ? r.paymentId.map((p) => (p && p._id ? p._id : p))
+        : [];
+
+      const participants = Array.isArray(r.participants)
+        ? r.participants.map((p) => ({
+            name: p && p.name ? String(p.name).trim() : "",
+            phone: p && p.phone ? String(p.phone).trim() : "",
+            ...(p && p.email ? { email: String(p.email).trim() } : {}),
+          }))
+        : [];
+
+      return {
+        _id: r._id,
+        registrationId: r._id,
+        eventId: isEvObj ? ev._id : ev,
+        title: ev.title || "",
+        description: ev.description || "",
+        actualPrice: typeof ev.registrationFee === "number" ? ev.registrationFee : (ev.actualPrice || 0),
+        registrationFee: typeof ev.registrationFee === "number" ? ev.registrationFee : (ev.actualPrice || 0),
+        image: ev.image || "",
+        imageUrl: ev.image || "",
+        location: ev.location || "",
+        date: ev.date || null,
+        timings: ev.timings || "",
+        minParticipants: ev.minParticipants || 1,
+        maxParticipants: ev.maxParticipants || 1,
+        participantsCount: participants.length,
+        participants: participants,
+        paymentId: pList,
+        payments: pList,
+        createdAt: r.createdAt,
+        updatedAt: r.updatedAt,
+        event: isEvObj ? ev : null,
+      };
+    });
 
     res.status(200).json({
       payment: {
@@ -376,6 +429,7 @@ const getPaymentDetails = async (req, res) => {
       eventsCount: events.length,
       events: events,
       associatedEvents: events,
+      registeredEvents: events,
     });
   } catch (error) {
     console.error("Get Payment Details Error:", error);
