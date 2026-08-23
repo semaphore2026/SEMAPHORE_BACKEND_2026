@@ -15,6 +15,7 @@ const {
   updatePaymentStatusWithMessage,
   getUserEventsWithDetails,
   getEventParticipantsByEventAndUser,
+  getUserFullDetailsForAdmin,
 } = require("../controllers/adminController");
 const {
   protectAdmin,
@@ -44,6 +45,12 @@ router.get("/users/:id", protectAdmin, getUserById);
 router.put("/users/:id", protectAdmin, updateUser);
 router.patch("/users/:id", protectAdmin, updateUser); // Alias
 router.delete("/users/:id", protectAdmin, deleteUser);
+
+// ================= USER FULL DETAILS ROUTE (ALL DATA FOR USER) =================
+// (Requires valid Admin or Superadmin JWT)
+router.get("/user-full-details/:userId", protectAdmin, getUserFullDetailsForAdmin);
+router.get("/users/:userId/full-details", protectAdmin, getUserFullDetailsForAdmin); // Alias
+router.get("/user-details/:userId", protectAdmin, getUserFullDetailsForAdmin); // Alias
 
 // ================= USER EVENTS DETAILS ROUTE =================
 // (Requires valid Admin or Superadmin JWT)

@@ -622,6 +622,134 @@ const getEventParticipantsByEventAndUser = async (req, res) => {
   }
 };
 
+// @desc    Get all details of a user (user details, team, college, registered events, payments, summary) for Admin
+// @route   GET /api/admin/user-full-details/:userId (also /api/admin/users/:userId/full-details)
+// @access  Private (Admin / Superadmin only)
+const getUserFullDetailsForAdmin = async (req, res) => {
+  try {
+    const userId = req.params.userId || req.params.id;
+
+    if (!userId) {
+      return res.status(400).json({ message: "Please provide userId" });
+    }
+
+    const user = await User.findById(userId)
+      .select("-password")
+      .populate("college")
+      .populate("teamid");
+
+    if (!user) {
+      return res.status(404).json({ message: "User not found" });
+    }
+
+    // Fetch all event registrations for this user
+    const registrations = await EventRegistration.find({ userId })
+      .populate("eventId")
+      .populate({
+        path: "paymentId",
+        populate: { path: "approvedBy", select: "name email role" },
+      });
+
+    // Fetch team members if user belongs to a team
+    let teamMembers = [];
+    if (user.teamid) {
+      teamMembers = await User.find({ teamid: user.teamid._id }).select(
+        "name email avatar collegeName createdAt"
+      );
+    } else {
+      teamMembers = [
+        {
+          _id: user._id,
+          name: user.name,
+          email: user.email,
+          avatar: user.avatar,
+          collegeName: user.collegeName,
+          createdAt: user.createdAt,
+        },
+      ];
+    }
+
+    // Extract all unique payments made by this user
+    const userPaymentsMap = new Map();
+    registrations.forEach((reg) => {
+      if (Array.isArray(reg.paymentId)) {
+        reg.paymentId.forEach((p) => {
+          if (p && p._id) {
+            userPaymentsMap.set(p._id.toString(), p);
+          }
+        });
+      }
+    });
+
+    const userPayments = Array.from(userPaymentsMap.values());
+    const totalAmountPaid = userPayments.reduce(
+      (sum, p) => sum + (p.amount || 0),
+      0
+    );
+
+    const eventsList = registrations.map((reg) => {
+      const ev = reg.eventId || {};
+      return {
+        registrationId: reg._id,
+        eventId: ev._id,
+        title: ev.title || "",
+        description: ev.description || "",
+        registrationFee: ev.registrationFee || 0,
+        actualPrice: ev.registrationFee || 0,
+        image: ev.image || "",
+        location: ev.location || "",
+        date: ev.date || null,
+        timings: ev.timings || "",
+        coordinators: ev.coordinators || [],
+        minParticipants: ev.minParticipants || 1,
+        maxParticipants: ev.maxParticipants || 1,
+        payments: reg.paymentId || [],
+        createdAt: reg.createdAt,
+        updatedAt: reg.updatedAt,
+      };
+    });
+
+    const teamObj = user.teamid || null;
+
+    res.status(200).json({
+      user: {
+        _id: user._id,
+        name: user.name,
+        email: user.email,
+        role: user.role,
+        avatar: user.avatar,
+        googleId: user.googleId || null,
+        collegeName: user.collegeName || "",
+        createdAt: user.createdAt,
+        updatedAt: user.updatedAt,
+      },
+      college: user.college || null,
+      team: teamObj
+        ? {
+            _id: teamObj._id,
+            name: teamObj.name,
+            teamid: teamObj.teamid,
+            createdAt: teamObj.createdAt,
+            updatedAt: teamObj.updatedAt,
+          }
+        : null,
+      teamName: teamObj ? teamObj.name : "",
+      hasTeam: Boolean(teamObj),
+      teamMembers,
+      registeredEvents: eventsList,
+      payments: userPayments,
+      summary: {
+        totalEventsRegistered: eventsList.length,
+        totalPaymentsSubmitted: userPayments.length,
+        totalAmountPaid,
+      },
+    });
+  } catch (error) {
+    console.error("Get User Full Details Error:", error);
+    res.status(500).json({ message: error.message });
+  }
+};
+
 module.exports = {
   loginAdmin,
   addAdmin,
@@ -637,6 +765,7 @@ module.exports = {
   updatePaymentStatusWithMessage,
   getUserEventsWithDetails,
   getEventParticipantsByEventAndUser,
+  getUserFullDetailsForAdmin,
 };
 
 
