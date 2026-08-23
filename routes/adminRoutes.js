@@ -14,6 +14,7 @@ const {
   getPaymentDetails,
   updatePaymentStatusWithMessage,
   getUserEventsWithDetails,
+  getEventParticipantsByEventAndUser,
 } = require("../controllers/adminController");
 const {
   protectAdmin,
@@ -44,11 +45,17 @@ router.put("/users/:id", protectAdmin, updateUser);
 router.patch("/users/:id", protectAdmin, updateUser); // Alias
 router.delete("/users/:id", protectAdmin, deleteUser);
 
-// ================= USER EVENTS & PARTICIPANTS DETAILS ROUTE =================
+// ================= USER EVENTS DETAILS ROUTE =================
 // (Requires valid Admin or Superadmin JWT)
 router.get("/user-events/:userId", protectAdmin, getUserEventsWithDetails);
 router.get("/users/:userId/events", protectAdmin, getUserEventsWithDetails); // Alias
 router.get("/events/user/:userId", protectAdmin, getUserEventsWithDetails); // Alias
+
+// ================= EVENT PARTICIPANTS DETAILS BY EVENT ID & USER ID =================
+// (Requires valid Admin or Superadmin JWT)
+router.get("/event-participants/:eventId/:userId", protectAdmin, getEventParticipantsByEventAndUser);
+router.get("/participants/event/:eventId/user/:userId", protectAdmin, getEventParticipantsByEventAndUser); // Alias
+router.get("/event-participants", protectAdmin, getEventParticipantsByEventAndUser); // Query params ?eventId=...&userId=...
 
 // ================= ADMIN PAYMENT MANAGEMENT ROUTES =================
 // (Requires valid Admin or Superadmin JWT)

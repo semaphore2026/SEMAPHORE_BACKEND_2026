@@ -3,6 +3,7 @@ const User = require("../models/User");
 const College = require("../models/College");
 const Payment = require("../models/Payment");
 const EventRegistration = require("../models/EventRegistrations");
+const Event = require("../models/Event");
 
 // @desc    Admin / Superadmin Login
 // @route   POST /api/admin/login
@@ -537,6 +538,90 @@ const getUserEventsWithDetails = async (req, res) => {
   }
 };
 
+// @desc    Get participants and event details by eventId and userId
+// @route   GET /api/admin/event-participants/:eventId/:userId (also /api/admin/event-participants)
+// @access  Private (Admin / Superadmin)
+const getEventParticipantsByEventAndUser = async (req, res) => {
+  try {
+    const eventId = req.params.eventId || req.query.eventId || req.query.eventid;
+    const userId = req.params.userId || req.query.userId || req.query.userid;
+
+    if (!eventId || !userId) {
+      return res.status(400).json({ message: "Please provide both eventId and userId" });
+    }
+
+    const user = await User.findById(userId)
+      .select("-password")
+      .populate("college")
+      .populate("teamid");
+
+    if (!user) {
+      return res.status(404).json({ message: "User not found" });
+    }
+
+    const event = await Event.findById(eventId);
+    if (!event) {
+      return res.status(404).json({ message: "Event not found" });
+    }
+
+    const registration = await EventRegistration.findOne({ userId, eventId })
+      .populate("eventId")
+      .populate({
+        path: "paymentId",
+        populate: { path: "approvedBy", select: "name email role" },
+      });
+
+    let teamMembers = [];
+    if (user.teamid) {
+      teamMembers = await User.find({ teamid: user.teamid._id }).select(
+        "name email avatar collegeName"
+      );
+    } else {
+      teamMembers = [
+        {
+          _id: user._id,
+          name: user.name,
+          email: user.email,
+          avatar: user.avatar,
+          collegeName: user.collegeName,
+        },
+      ];
+    }
+
+    res.status(200).json({
+      registrationId: registration ? registration._id : null,
+      event: {
+        _id: event._id,
+        title: event.title,
+        description: event.description,
+        registrationFee: event.registrationFee,
+        actualPrice: event.registrationFee,
+        location: event.location,
+        date: event.date,
+        capacity: event.capacity,
+        minParticipants: event.minParticipants,
+        maxParticipants: event.maxParticipants,
+      },
+      user: {
+        _id: user._id,
+        name: user.name,
+        email: user.email,
+        avatar: user.avatar,
+        collegeName: user.collegeName,
+      },
+      college: user.college || null,
+      team: user.teamid || null,
+      participantsCount: teamMembers.length,
+      participants: teamMembers,
+      payments: registration ? registration.paymentId : [],
+      createdAt: registration ? registration.createdAt : null,
+    });
+  } catch (error) {
+    console.error("Get Event Participants Error:", error);
+    res.status(500).json({ message: error.message });
+  }
+};
+
 module.exports = {
   loginAdmin,
   addAdmin,
@@ -551,6 +636,7 @@ module.exports = {
   getPaymentDetails,
   updatePaymentStatusWithMessage,
   getUserEventsWithDetails,
+  getEventParticipantsByEventAndUser,
 };
 
 
