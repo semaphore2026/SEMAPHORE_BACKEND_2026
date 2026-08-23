@@ -10,7 +10,20 @@ const formatRegistration = (reg) => {
   const isEvObj = typeof ev === "object" && ev !== null && ev._id;
 
   const paymentIds = Array.isArray(reg.paymentId)
-    ? reg.paymentId.map((p) => (p && p._id ? p._id.toString() : p.toString()))
+    ? reg.paymentId.map((p) => {
+        if (p && typeof p === "object" && (p._id || p.imageUrl || p.utr)) {
+          return {
+            _id: p._id ? p._id.toString() : "",
+            amount: p.amount || 0,
+            utr: p.utr || "",
+            imageUrl: p.imageUrl || p.imageurl || "",
+            imageurl: p.imageUrl || p.imageurl || "",
+            status: p.status || "pending",
+            message: p.message || "",
+          };
+        }
+        return p ? p.toString() : "";
+      })
     : [];
 
   const userIdStr =
