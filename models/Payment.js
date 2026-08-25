@@ -18,8 +18,14 @@ const paymentSchema = new mongoose.Schema(
     },
     utr: {
       type: String,
+      required: [true, "UTR number is required for payment verification"],
       trim: true,
-      default: "",
+      uppercase: true,
+      match: [
+        /^[A-Z0-9]{12,22}$/,
+        "UTR must be 12 to 22 alphanumeric characters (letters and numbers only)",
+      ],
+      sparse: true,
     },
     timestamp: {
       type: Date,

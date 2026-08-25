@@ -4,6 +4,7 @@ const Event = require("../models/Event");
 const User = require("../models/User");
 const College = require("../models/College");
 const Team = require("../models/Team");
+const { normalizeAndValidateUTR, checkUTRUniqueness } = require("../utils/utrValidator");
 
 // Helper function to check if user has teamid set
 const verifyUserHasTeam = async (userId) => {
@@ -316,12 +317,27 @@ const makePayment = async (req, res) => {
       return res.status(404).json({ message: "No valid events found for provided event IDs" });
     }
 
-    // Create single Payment record
+    // Strict UTR validation (12-22 alphanumeric, uppercase, required)
+    let normalizedUtr;
+    try {
+      normalizedUtr = normalizeAndValidateUTR(utr);
+    } catch (utrErr) {
+      return res.status(utrErr.statusCode || 400).json({ message: utrErr.message });
+    }
+
+    // UTR Uniqueness and duplicate submission check
+    try {
+      await checkUTRUniqueness(normalizedUtr, userId);
+    } catch (dupErr) {
+      return res.status(dupErr.statusCode || 409).json({ message: dupErr.message });
+    }
+
+    // Create single Payment record (Status is strictly pending on submission)
     const payment = await Payment.create({
       user: userId,
       imageUrl,
       amount: amount ? Number(amount) : 0,
-      utr: utr ? String(utr).trim() : "",
+      utr: normalizedUtr,
       timestamp: new Date(),
       status: "pending",
       message: "",
