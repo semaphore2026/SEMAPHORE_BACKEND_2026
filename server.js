@@ -1,5 +1,4 @@
 require("dotenv").config();
-
 const express = require("express");
 const cors = require("cors");
 const connectDB = require("./config/db");
@@ -19,66 +18,29 @@ connectDB();
 
 const app = express();
 
-// Trust reverse proxy (AWS EC2 / Nginx / ALB)
 app.set("trust proxy", true);
 
 // =========================
 // CORS
 // =========================
-
-const corsOptions = {
-  origin: (origin, callback) => {
-    // Allow requests without an Origin header
-    // (Postman, server-to-server, mobile apps, etc.)
-    if (!origin) {
-      return callback(null, true);
-    }
-
-    // Allow ALL origins
-    return callback(null, true);
-  },
-
-  credentials: true,
-
+app.use(cors({
+  origin: "*",
   methods: ["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"],
+  allowedHeaders: ["Content-Type", "Authorization", "X-Requested-With", "x-access-token"],
+}));
 
-  allowedHeaders: [
-    "Origin",
-    "X-Requested-With",
-    "Content-Type",
-    "Accept",
-    "Authorization",
-    "x-access-token",
-  ],
-
-  exposedHeaders: ["Content-Range", "X-Content-Range"],
-
-  optionsSuccessStatus: 204,
-};
-
-app.use(cors(corsOptions));
-
-// =========================
-// BODY PARSERS
-// =========================
-
+// Body parsers
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
-// =========================
-// BASE ROUTE
-// =========================
-
+// Base Route
 app.get("/", (req, res) => {
   res.json({
     message: "Welcome to Semaphore Backend API 2026",
   });
 });
 
-// =========================
-// API ROUTES
-// =========================
-
+// API Routes
 app.use("/api/auth", authRoutes);
 app.use("/api/events", eventRoutes);
 app.use("/api/colleges", collegeRoutes);
@@ -90,20 +52,14 @@ app.use("/api/teams", teamRoutes);
 app.use("/api/team-rules", teamRulesRoutes);
 app.use("/api/teamrules", teamRulesRoutes);
 
-// =========================
-// 404 HANDLER
-// =========================
-
+// 404 Handler
 app.use((req, res) => {
   res.status(404).json({
     message: "Route not found",
   });
 });
 
-// =========================
-// GLOBAL ERROR HANDLER
-// =========================
-
+// Global Error Handler
 app.use((err, req, res, next) => {
   console.error(err.stack);
 
@@ -112,15 +68,10 @@ app.use((err, req, res, next) => {
   });
 });
 
-// =========================
-// SERVER
-// =========================
-
 const PORT = process.env.PORT || 3000;
 
 app.listen(PORT, () => {
   console.log(
-    `Server running in ${process.env.NODE_ENV || "development"
-    } mode on port ${PORT}`
+    `Server running in ${process.env.NODE_ENV || "development"} mode on port ${PORT}`
   );
 });
