@@ -1,4 +1,5 @@
 require("dotenv").config();
+
 const express = require("express");
 const cors = require("cors");
 const connectDB = require("./config/db");
@@ -21,58 +22,63 @@ const app = express();
 // Trust reverse proxy (AWS EC2 / Nginx / ALB)
 app.set("trust proxy", true);
 
-// Middleware - Allow all origins unconditionally on CORS policy
+// =========================
+// CORS
+// =========================
+
 const corsOptions = {
-  origin: true, // Automatically reflects any requesting origin (allows all origins and works with credentials)
+  origin: (origin, callback) => {
+    // Allow requests without an Origin header
+    // (Postman, server-to-server, mobile apps, etc.)
+    if (!origin) {
+      return callback(null, true);
+    }
+
+    // Allow ALL origins
+    return callback(null, true);
+  },
+
   credentials: true,
+
   methods: ["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"],
+
   allowedHeaders: [
     "Origin",
     "X-Requested-With",
     "Content-Type",
     "Accept",
     "Authorization",
-    "Access-Control-Allow-Origin",
-    "Access-Control-Allow-Credentials",
-    "Access-Control-Allow-Headers",
     "x-access-token",
   ],
+
   exposedHeaders: ["Content-Range", "X-Content-Range"],
-  optionsSuccessStatus: 200,
+
+  optionsSuccessStatus: 204,
 };
 
 app.use(cors(corsOptions));
 
-// Explicit CORS header middleware & preflight OPTIONS handler for all origins
-app.use((req, res, next) => {
-  const origin = req.headers.origin;
-  res.setHeader("Access-Control-Allow-Origin", origin || "*");
-  res.setHeader("Access-Control-Allow-Credentials", "true");
-  res.setHeader(
-    "Access-Control-Allow-Methods",
-    "GET, POST, PUT, DELETE, PATCH, OPTIONS"
-  );
-  res.setHeader(
-    "Access-Control-Allow-Headers",
-    "Origin, X-Requested-With, Content-Type, Accept, Authorization, Access-Control-Allow-Origin, Access-Control-Allow-Credentials, x-access-token"
-  );
-  res.setHeader("Cross-Origin-Opener-Policy", "same-origin-allow-popups");
-
-  if (req.method === "OPTIONS") {
-    return res.status(200).end();
-  }
-  next();
-});
+// =========================
+// BODY PARSERS
+// =========================
 
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
-// Base Route
+// =========================
+// BASE ROUTE
+// =========================
+
 app.get("/", (req, res) => {
-  res.json({ message: "Welcome to Semaphore Backend API 2026" });
+  res.json({
+    message: "Welcome to Semaphore Backend API 2026",
+  });
 });
 
-// API Routes
+// =========================
+// API ROUTES
+// =========================
+
 app.use("/api/auth", authRoutes);
 app.use("/api/events", eventRoutes);
 app.use("/api/colleges", collegeRoutes);
@@ -84,25 +90,37 @@ app.use("/api/teams", teamRoutes);
 app.use("/api/team-rules", teamRulesRoutes);
 app.use("/api/teamrules", teamRulesRoutes);
 
-// 404 Handler
-app.use((req, res, next) => {
-  res.status(404).json({ message: "Route not found" });
+// =========================
+// 404 HANDLER
+// =========================
+
+app.use((req, res) => {
+  res.status(404).json({
+    message: "Route not found",
+  });
 });
 
-// Global Error Handling Middleware
+// =========================
+// GLOBAL ERROR HANDLER
+// =========================
+
 app.use((err, req, res, next) => {
   console.error(err.stack);
-  if (req.headers.origin) {
-    res.setHeader("Access-Control-Allow-Origin", req.headers.origin);
-    res.setHeader("Access-Control-Allow-Credentials", "true");
-  }
+
   res.status(err.status || 500).json({
     message: err.message || "Internal Server Error",
   });
 });
 
+// =========================
+// SERVER
+// =========================
+
 const PORT = process.env.PORT || 3000;
 
 app.listen(PORT, () => {
-  console.log(`Server running in ${process.env.NODE_ENV || "development"} mode on port ${PORT}`);
+  console.log(
+    `Server running in ${process.env.NODE_ENV || "development"
+    } mode on port ${PORT}`
+  );
 });
