@@ -13,6 +13,8 @@ const protectAdmin = async (req, res, next) => {
     token = req.headers.authorization.split(" ")[1];
   } else if (req.headers.authorization) {
     token = req.headers.authorization.trim();
+  } else if (req.query && req.query.token) {
+    token = String(req.query.token).trim();
   }
 
   if (token) {

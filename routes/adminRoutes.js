@@ -18,6 +18,16 @@ const {
   getUserFullDetailsForAdmin,
 } = require("../controllers/adminController");
 const {
+  exportTeamsExcel,
+  exportEventsExcel,
+  exportCollegesExcel,
+  exportMasterExcel,
+  getTeamsReportJson,
+  getEventsReportJson,
+  getCollegesReportJson,
+  getReportsSummaryJson,
+} = require("../controllers/adminExportController");
+const {
   protectAdmin,
   superadminOnly,
 } = require("../middleware/adminAuthMiddleware");
@@ -76,5 +86,30 @@ router.post("/payment-status", protectAdmin, updatePaymentStatusWithMessage);
 router.put("/payment-status", protectAdmin, updatePaymentStatusWithMessage); // Alias
 router.put("/payment-status/:paymentId", protectAdmin, updatePaymentStatusWithMessage); // Alias
 router.put("/payments/:paymentId/status", protectAdmin, updatePaymentStatusWithMessage); // Alias
+
+// ================= EXCEL EXPORT ROUTES =================
+// 1. Teams & Participants Excel Export
+router.get("/export/teams", protectAdmin, exportTeamsExcel);
+router.get("/export/team-participants", protectAdmin, exportTeamsExcel); // Alias
+
+// 2. Events & Participants (with College Name) Excel Export
+router.get("/export/events", protectAdmin, exportEventsExcel);
+router.get("/export/events/:eventId", protectAdmin, exportEventsExcel);
+router.get("/export/event-participants", protectAdmin, exportEventsExcel); // Alias
+router.get("/export/event-participants/:eventId", protectAdmin, exportEventsExcel); // Alias
+
+// 3. College-wise (At-most 2 Teams per College) Excel Export
+router.get("/export/colleges", protectAdmin, exportCollegesExcel);
+router.get("/export/college-teams", protectAdmin, exportCollegesExcel); // Alias
+
+// 4. Master Consolidated All-In-One Excel Export
+router.get("/export/all", protectAdmin, exportMasterExcel);
+router.get("/export/master", protectAdmin, exportMasterExcel); // Alias
+
+// ================= ADMIN JSON REPORTS ROUTES =================
+router.get("/reports/teams", protectAdmin, getTeamsReportJson);
+router.get("/reports/events", protectAdmin, getEventsReportJson);
+router.get("/reports/colleges", protectAdmin, getCollegesReportJson);
+router.get("/reports/summary", protectAdmin, getReportsSummaryJson);
 
 module.exports = router;
