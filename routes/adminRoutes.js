@@ -13,6 +13,7 @@ const {
   getRecentPayments,
   getPaymentDetails,
   updatePaymentStatusWithMessage,
+  deletePayment,
   getUserEventsWithDetails,
   getEventParticipantsByEventAndUser,
   getUserFullDetailsForAdmin,
@@ -91,6 +92,10 @@ router.post("/payment-status", protectAdmin, updatePaymentStatusWithMessage);
 router.put("/payment-status", protectAdmin, updatePaymentStatusWithMessage); // Alias
 router.put("/payment-status/:paymentId", protectAdmin, updatePaymentStatusWithMessage); // Alias
 router.put("/payments/:paymentId/status", protectAdmin, updatePaymentStatusWithMessage); // Alias
+
+router.delete("/payments/:paymentId", protectAdmin, deletePayment);
+router.delete("/payment/:paymentId", protectAdmin, deletePayment); // Alias
+router.delete("/payments", protectAdmin, deletePayment); // Alias
 
 // ================= EXCEL EXPORT ROUTES =================
 // 1. Teams & Participants Excel Export

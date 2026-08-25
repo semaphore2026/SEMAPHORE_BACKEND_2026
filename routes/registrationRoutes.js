@@ -16,6 +16,7 @@ const {
 } = require("../controllers/registrationController");
 const {
   updatePaymentStatusWithMessage,
+  deletePayment,
 } = require("../controllers/adminController");
 const { protect } = require("../middleware/authMiddleware");
 const { upload } = require("../config/cloudinary");
@@ -80,6 +81,10 @@ router.put("/:id/payment-status", protectAnyAdmin, updatePaymentStatusWithMessag
 router.patch("/:id/payment-status", protectAnyAdmin, updatePaymentStatusWithMessage);
 router.put("/payment-status/:id", protectAnyAdmin, updatePaymentStatusWithMessage);
 router.patch("/payment-status/:id", protectAnyAdmin, updatePaymentStatusWithMessage);
+
+router.delete("/payments/:paymentId", protectAnyAdmin, deletePayment);
+router.delete("/payment/:paymentId", protectAnyAdmin, deletePayment);
+router.delete("/payment-status/:id", protectAnyAdmin, deletePayment);
 
 router.get("/all", protectAnyAdmin, getAllRegistrations);
 

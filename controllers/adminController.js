@@ -520,6 +520,132 @@ const updatePaymentStatusWithMessage = async (req, res) => {
   }
 };
 
+// @desc    Delete payment record as admin and update associated event registration statuses to not paid / yet_to_pay
+// @route   DELETE /api/admin/payments/:paymentId (also DELETE /api/admin/payment/:paymentId)
+// @access  Private (Admin / Superadmin)
+const deletePayment = async (req, res) => {
+  try {
+    const paymentId =
+      req.params.paymentId ||
+      req.params.id ||
+      req.body.paymentId ||
+      req.body.paymentid ||
+      req.query.paymentId ||
+      req.query.id;
+
+    if (!paymentId) {
+      return res.status(400).json({ message: "Please provide paymentId" });
+    }
+
+    if (!mongoose.Types.ObjectId.isValid(paymentId)) {
+      return res.status(400).json({ message: "Invalid paymentId format" });
+    }
+
+    const payment = await Payment.findById(paymentId);
+    if (!payment) {
+      return res.status(404).json({ message: "Payment record not found" });
+    }
+
+    // Collect query IDs for payment (string & ObjectId)
+    const targetPaymentObjId = new mongoose.Types.ObjectId(payment._id);
+    const targetPaymentStr = payment._id.toString();
+
+    // Find all EventRegistration documents linked to this paymentId
+    const affectedRegistrations = await EventRegistration.find({
+      paymentId: { $in: [targetPaymentObjId, targetPaymentStr] },
+    }).populate("eventId", "title registrationFee actualPrice");
+
+    // Remove paymentId from all matching EventRegistration records ($pull)
+    await EventRegistration.updateMany(
+      { paymentId: { $in: [targetPaymentObjId, targetPaymentStr] } },
+      { $pull: { paymentId: targetPaymentObjId } }
+    );
+    // Also pull raw string if any legacy records stored string instead of ObjectId
+    await EventRegistration.updateMany(
+      { paymentId: targetPaymentStr },
+      { $pull: { paymentId: targetPaymentStr } }
+    );
+
+    // Delete the payment document
+    await Payment.findByIdAndDelete(payment._id);
+
+    // Re-fetch updated event registrations to calculate their updated payment status
+    const updatedRegsList = await Promise.all(
+      affectedRegistrations.map(async (reg) => {
+        const updatedReg = await EventRegistration.findById(reg._id)
+          .populate("eventId", "title registrationFee actualPrice")
+          .populate("paymentId");
+
+        if (!updatedReg) return null;
+
+        const remainingPayments = Array.isArray(updatedReg.paymentId)
+          ? updatedReg.paymentId.filter((p) => p && p.status)
+          : [];
+
+        const ev = updatedReg.eventId || {};
+        const fee =
+          typeof ev.registrationFee === "number"
+            ? ev.registrationFee
+            : ev.actualPrice || 0;
+
+        const approvedPaid = remainingPayments
+          .filter((p) => p.status === "approved" || p.status === "verified")
+          .reduce((sum, p) => sum + (p.amount || 0), 0);
+
+        const pendingPaid = remainingPayments
+          .filter((p) => p.status === "pending" || p.status === "submitted")
+          .reduce((sum, p) => sum + (p.amount || 0), 0);
+
+        let newStatus = "yet_to_pay";
+        if (remainingPayments.length === 0) {
+          newStatus = "yet_to_pay";
+        } else if (approvedPaid >= fee && fee > 0) {
+          newStatus = "approved";
+        } else if (approvedPaid > 0) {
+          newStatus = "partially_paid";
+        } else if (pendingPaid > 0) {
+          newStatus = "pending";
+        } else if (remainingPayments.some((p) => p.status === "rejected")) {
+          newStatus = "rejected";
+        } else {
+          newStatus = "yet_to_pay";
+        }
+
+        return {
+          registrationId: updatedReg._id,
+          eventId: ev._id || updatedReg.eventId,
+          eventTitle: ev.title || "",
+          userId: updatedReg.userId,
+          paymentStatus: newStatus,
+          statusMessage: newStatus === "yet_to_pay" ? "Not Paid (Payment Deleted)" : newStatus,
+          remainingPaymentsCount: remainingPayments.length,
+        };
+      })
+    );
+
+    const validUpdatedRegsList = updatedRegsList.filter(Boolean);
+
+    res.status(200).json({
+      message: `Payment deleted successfully and disassociated from ${affectedRegistrations.length} event registration(s)`,
+      deletedPayment: {
+        _id: payment._id,
+        paymentid: payment._id,
+        user: payment.user,
+        amount: payment.amount,
+        utr: payment.utr,
+        status: payment.status,
+        imageUrl: payment.imageUrl,
+        createdAt: payment.createdAt,
+      },
+      affectedRegistrationsCount: affectedRegistrations.length,
+      affectedRegistrations: validUpdatedRegsList,
+    });
+  } catch (error) {
+    console.error("Delete Payment Error:", error);
+    res.status(500).json({ message: error.message });
+  }
+};
+
 // @desc    Get registered events, actual price amount, and participants for a specific user
 // @route   GET /api/admin/user-events/:userId (also /api/admin/users/:userId/events)
 // @access  Private (Admin / Superadmin)
@@ -837,6 +963,7 @@ module.exports = {
   getRecentPayments,
   getPaymentDetails,
   updatePaymentStatusWithMessage,
+  deletePayment,
   getUserEventsWithDetails,
   getEventParticipantsByEventAndUser,
   getUserFullDetailsForAdmin,
