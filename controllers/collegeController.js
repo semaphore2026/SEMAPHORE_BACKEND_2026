@@ -418,10 +418,60 @@ const updateCollege = async (req, res) => {
   }
 };
 
+// @desc    Delete a college (Admin only)
+// @route   DELETE /api/colleges/:id
+// @access  Protected (Admin JWT required)
+const deleteCollege = async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    let college = null;
+    if (mongoose.Types.ObjectId.isValid(id)) {
+      college = await College.findById(id);
+    } else {
+      college = await College.findOne({
+        collegeName: { $regex: new RegExp(`^${id.trim()}$`, "i") },
+      });
+    }
+
+    if (!college) {
+      return res.status(404).json({ message: "College not found" });
+    }
+
+    // Clear college references for any registered users belonging to this college
+    await User.updateMany(
+      {
+        $or: [
+          { college: college._id },
+          { collegeName: { $regex: new RegExp(`^${college.collegeName}$`, "i") } },
+        ],
+      },
+      {
+        $set: { college: null, collegeName: "" },
+      }
+    );
+
+    // Delete the college document
+    await college.deleteOne();
+
+    res.status(200).json({
+      message: "College deleted successfully",
+      deletedCollege: {
+        _id: college._id,
+        collegeName: college.collegeName,
+      },
+    });
+  } catch (error) {
+    console.error("Delete College Error:", error);
+    res.status(500).json({ message: error.message });
+  }
+};
+
 module.exports = {
   addCollege,
   getColleges,
   getCollegeById,
   updateCollege,
+  deleteCollege,
   buildCollegeComprehensiveObject,
 };

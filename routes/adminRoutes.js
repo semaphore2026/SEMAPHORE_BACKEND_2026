@@ -30,6 +30,9 @@ const {
   getReportsSummaryJson,
 } = require("../controllers/adminExportController");
 const {
+  deleteCollege,
+} = require("../controllers/collegeController");
+const {
   protectAdmin,
   superadminOnly,
 } = require("../middleware/adminAuthMiddleware");
@@ -122,5 +125,8 @@ router.get("/reports/college-comprehensive", protectAdmin, getCollegeComprehensi
 router.get("/reports/college-comprehensive/:collegeId", protectAdmin, getCollegeComprehensiveJson);
 router.get("/reports/college/:collegeId", protectAdmin, getCollegeComprehensiveJson); // Alias
 router.get("/reports/summary", protectAdmin, getReportsSummaryJson);
+
+// ================= COLLEGE MANAGEMENT ROUTES =================
+router.delete("/colleges/:id", protectAdmin, deleteCollege);
 
 module.exports = router;
