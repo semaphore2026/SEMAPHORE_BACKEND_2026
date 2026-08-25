@@ -11,6 +11,7 @@ const adminRoutes = require("./routes/adminRoutes");
 const timetableRoutes = require("./routes/timetableRoutes");
 const registrationRoutes = require("./routes/registrationRoutes");
 const teamRoutes = require("./routes/teamRoutes");
+const teamRulesRoutes = require("./routes/teamRulesRoutes");
 
 // Initialize Database Connection
 connectDB();
@@ -40,6 +41,8 @@ app.use("/api/timetable", timetableRoutes);
 app.use("/api/registrations", registrationRoutes);
 app.use("/api/event-registrations", registrationRoutes);
 app.use("/api/teams", teamRoutes);
+app.use("/api/team-rules", teamRulesRoutes);
+app.use("/api/teamrules", teamRulesRoutes);
 
 
 // 404 Handler
