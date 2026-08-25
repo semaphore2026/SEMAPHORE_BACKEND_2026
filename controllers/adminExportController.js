@@ -1,6 +1,7 @@
 const ExcelJS = require("exceljs");
 const mongoose = require("mongoose");
 const User = require("../models/User");
+const Admin = require("../models/Admin");
 const Team = require("../models/Team");
 const College = require("../models/College");
 const Event = require("../models/Event");
@@ -1197,6 +1198,764 @@ const getTeamsReportJson = async (req, res) => {
   }
 };
 
+/**
+ * Helper to fetch complete comprehensive college details including all events and all payment transactions
+ */
+const fetchCollegeComprehensiveData = async (collegeIdentifier = null) => {
+  let collegeQuery = {};
+  if (collegeIdentifier) {
+    if (mongoose.Types.ObjectId.isValid(collegeIdentifier)) {
+      collegeQuery = { _id: collegeIdentifier };
+    } else {
+      collegeQuery = { collegeName: { $regex: new RegExp(`^${collegeIdentifier.trim()}$`, "i") } };
+    }
+  }
+
+  const colleges = await College.find(collegeQuery).sort({ collegeName: 1 });
+  const result = [];
+
+  for (const college of colleges) {
+    // 1. Fetch all users for this college
+    const users = await User.find({
+      $or: [
+        { college: college._id },
+        { collegeName: { $regex: new RegExp(`^${college.collegeName}$`, "i") } },
+      ],
+    })
+      .populate("teamid")
+      .select("-password");
+
+    const allCollegeUserIds = users.map((u) => u._id);
+
+    // 2. Group users into at-most 2 teams
+    const teamMap = new Map();
+    users.forEach((u) => {
+      if (u.teamid && u.teamid._id) {
+        const tId = u.teamid._id.toString();
+        if (!teamMap.has(tId)) {
+          teamMap.set(tId, { team: u.teamid, users: [] });
+        }
+        teamMap.get(tId).users.push(u);
+      }
+    });
+
+    const teamsList = [];
+    const allCollegeEventsList = [];
+    let slotNum = 1;
+
+    for (const [teamDocId, group] of teamMap.entries()) {
+      if (slotNum > 2) break; // Max 2 teams limit
+
+      const teamObj = group.team;
+      const teamUsers = group.users;
+      const teamUserIds = teamUsers.map((u) => u._id);
+
+      // Fetch registrations for this team
+      const registrations = await EventRegistration.find({
+        userId: { $in: teamUserIds },
+      })
+        .populate("eventId")
+        .populate({
+          path: "paymentId",
+          populate: { path: "approvedBy", select: "name email role" },
+        });
+
+      // Process team events
+      const teamEvents = [];
+      registrations.forEach((reg) => {
+        const ev = reg.eventId;
+        if (ev && ev._id) {
+          const fee = typeof ev.registrationFee === "number" ? ev.registrationFee : (ev.actualPrice || 0);
+
+          // Collect and parse all linked payments for this event registration
+          const linkedPayments = [];
+          if (Array.isArray(reg.paymentId)) {
+            reg.paymentId.forEach((p) => {
+              if (p && p._id) {
+                const appBy = p.approvedBy || {};
+                linkedPayments.push({
+                  _id: p._id,
+                  paymentId: p._id.toString(),
+                  amount: p.amount || 0,
+                  utr: p.utr || "N/A",
+                  imageUrl: p.imageUrl || p.imageurl || "",
+                  status: p.status || "pending",
+                  message: p.message || "",
+                  approvedBy: appBy.name ? { name: appBy.name, email: appBy.email, role: appBy.role } : null,
+                  approvedByName: appBy.name || "N/A",
+                  createdAt: p.createdAt,
+                });
+              }
+            });
+          }
+
+          const approvedPaid = linkedPayments
+            .filter((p) => p.status === "approved" || p.status === "verified")
+            .reduce((sum, p) => sum + p.amount, 0);
+
+          const pendingPaid = linkedPayments
+            .filter((p) => p.status === "pending" || p.status === "submitted")
+            .reduce((sum, p) => sum + p.amount, 0);
+
+          const balanceDue = Math.max(0, fee - approvedPaid);
+
+          let eventStatus = "Yet to Pay";
+          if (linkedPayments.length === 0) {
+            eventStatus = "Yet to Pay";
+          } else if (approvedPaid >= fee && fee > 0) {
+            eventStatus = "Approved";
+          } else if (approvedPaid > 0 && balanceDue > 0) {
+            eventStatus = `Partially Paid (Yet to Pay ₹${balanceDue})`;
+          } else if (pendingPaid > 0 && approvedPaid === 0) {
+            eventStatus = "Pending Approval";
+          } else if (linkedPayments.some((p) => p.status === "rejected")) {
+            eventStatus = "Rejected";
+          } else {
+            eventStatus = linkedPayments[0].status ? linkedPayments[0].status.toUpperCase() : "Pending";
+          }
+
+          // Build human-readable breakdown of all payments for this event
+          const paymentBreakdownList = linkedPayments.map((p, pIndex) => {
+            return `Payment #${pIndex + 1}: ₹${p.amount} (UTR: ${p.utr}, Status: ${p.status.toUpperCase()})`;
+          });
+
+          const paymentBreakdownStr = paymentBreakdownList.length > 0
+            ? paymentBreakdownList.join(" | ")
+            : "No payment submitted yet (Yet to Pay)";
+
+          const participants = Array.isArray(reg.participants) && reg.participants.length > 0
+            ? reg.participants.map((p) => ({
+                name: p && p.name ? String(p.name).trim() : "N/A",
+                phone: p && p.phone ? String(p.phone).trim() : "N/A",
+                email: p && p.email ? String(p.email).trim() : "",
+              }))
+            : teamUsers.map((tu) => ({ name: tu.name, phone: tu.phone || "N/A", email: tu.email || "" }));
+
+          const eventItem = {
+            registrationId: reg._id,
+            teamSlot: `Team ${slotNum}`,
+            teamName: teamObj.name,
+            teamId: teamObj.teamid,
+            eventId: ev._id,
+            title: ev.title || "Event",
+            description: ev.description || "",
+            location: ev.location || "Campus",
+            date: ev.date || null,
+            registrationFee: fee,
+            amountPaid: approvedPaid,
+            pendingPaid: pendingPaid,
+            balanceDue: balanceDue,
+            isYetToPay: balanceDue > 0,
+            paymentStatus: eventStatus,
+            paymentsCount: linkedPayments.length,
+            payments: linkedPayments,
+            paymentBreakdown: paymentBreakdownStr,
+            utrs: linkedPayments.map((p) => p.utr).filter(Boolean),
+            paymentUtr: linkedPayments.map((p) => p.utr).filter(Boolean).join(", ") || "N/A",
+            participantsCount: participants.length,
+            participants,
+            registeredAt: reg.createdAt,
+          };
+
+          teamEvents.push(eventItem);
+          allCollegeEventsList.push({
+            collegeName: college.collegeName,
+            ...eventItem,
+          });
+        }
+      });
+
+      // Team members map
+      const membersMap = new Map();
+      teamUsers.forEach((u, uIdx) => {
+        const k = (u.email || u.name).toLowerCase();
+        membersMap.set(k, {
+          name: u.name,
+          email: u.email,
+          phone: u.phone || "",
+          role: uIdx === 0 ? "Team Leader" : "Team Member",
+          isRegisteredUser: true,
+        });
+      });
+
+      registrations.forEach((r) => {
+        if (Array.isArray(r.participants)) {
+          r.participants.forEach((p) => {
+            if (p && (p.name || p.phone || p.email)) {
+              const k = (p.email || p.name || p.phone).toLowerCase();
+              if (!membersMap.has(k)) {
+                membersMap.set(k, {
+                  name: p.name || "N/A",
+                  email: p.email || "",
+                  phone: p.phone || "",
+                  role: "Team Participant",
+                  isRegisteredUser: false,
+                });
+              }
+            }
+          });
+        }
+      });
+
+      const leader = teamUsers[0] || null;
+      const teamTotalFee = teamEvents.reduce((s, e) => s + e.registrationFee, 0);
+      const teamApprovedPaid = teamEvents.reduce((s, e) => s + e.amountPaid, 0);
+      const teamPendingPaid = teamEvents.reduce((s, e) => s + e.pendingPaid, 0);
+      const teamBalanceDue = Math.max(0, teamTotalFee - teamApprovedPaid);
+
+      let teamPaymentStatus = "Yet to Pay";
+      if (teamEvents.length === 0) {
+        teamPaymentStatus = "No Events Registered";
+      } else if (teamApprovedPaid >= teamTotalFee && teamTotalFee > 0) {
+        teamPaymentStatus = "Approved";
+      } else if (teamApprovedPaid > 0 && teamBalanceDue > 0) {
+        teamPaymentStatus = `Partially Paid (Yet to Pay ₹${teamBalanceDue})`;
+      } else if (teamPendingPaid > 0) {
+        teamPaymentStatus = "Pending Approval";
+      } else {
+        teamPaymentStatus = "Yet to Pay";
+      }
+
+      teamsList.push({
+        slot: `Team ${slotNum}`,
+        slotNumber: slotNum,
+        teamName: teamObj.name,
+        teamId: teamObj.teamid,
+        _id: teamObj._id,
+        leader: leader ? { name: leader.name, email: leader.email, phone: leader.phone || "" } : null,
+        membersCount: membersMap.size,
+        members: Array.from(membersMap.values()),
+        eventsCount: teamEvents.length,
+        events: teamEvents,
+        totalFee: teamTotalFee,
+        amountPaid: teamApprovedPaid,
+        pendingAmount: teamPendingPaid,
+        balanceDue: teamBalanceDue,
+        isYetToPay: teamBalanceDue > 0,
+        paymentStatus: teamPaymentStatus,
+      });
+
+      slotNum++;
+    }
+
+    // 3. Fetch all payment transactions for users in this college
+    const collegePayments = await Payment.find({ user: { $in: allCollegeUserIds } })
+      .populate("user", "name email phone collegeName teamid")
+      .populate("approvedBy", "name email role")
+      .sort({ createdAt: -1 });
+
+    const paymentsList = collegePayments.map((p) => {
+      const u = p.user || {};
+      const appBy = p.approvedBy || {};
+
+      let matchedTeamName = "N/A";
+      let matchedTeamId = "N/A";
+      if (u.teamid) {
+        const matchingTeam = teamsList.find((t) => t._id.toString() === u.teamid.toString());
+        if (matchingTeam) {
+          matchedTeamName = matchingTeam.teamName;
+          matchedTeamId = matchingTeam.teamId;
+        }
+      }
+
+      return {
+        _id: p._id,
+        paymentId: p._id.toString(),
+        collegeName: college.collegeName,
+        teamName: matchedTeamName,
+        teamId: matchedTeamId,
+        paidBy: {
+          name: u.name || "N/A",
+          email: u.email || "N/A",
+          phone: u.phone || "N/A",
+        },
+        amount: p.amount || 0,
+        utr: p.utr || "N/A",
+        imageUrl: p.imageUrl || p.imageurl || "",
+        status: p.status || "pending",
+        message: p.message || "",
+        approvedBy: appBy.name ? { name: appBy.name, email: appBy.email, role: appBy.role } : null,
+        approvedByName: appBy.name || "N/A",
+        timestamp: p.timestamp || p.createdAt,
+        createdAt: p.createdAt,
+      };
+    });
+
+    // Financial totals
+    const totalEventsFee = allCollegeEventsList.reduce((s, e) => s + (e.registrationFee || 0), 0);
+    const totalPaymentsSubmitted = paymentsList.reduce((s, p) => s + (p.amount || 0), 0);
+    const totalApprovedAmount = paymentsList
+      .filter((p) => p.status === "approved" || p.status === "verified")
+      .reduce((s, p) => s + (p.amount || 0), 0);
+    const totalPendingAmount = paymentsList
+      .filter((p) => p.status === "pending" || p.status === "submitted")
+      .reduce((s, p) => s + (p.amount || 0), 0);
+    const balanceDue = Math.max(0, totalEventsFee - totalApprovedAmount);
+
+    let overallPaymentStatus = "Yet to Pay";
+    if (paymentsList.length === 0 && totalEventsFee > 0) {
+      overallPaymentStatus = "Yet to Pay";
+    } else if (totalApprovedAmount >= totalEventsFee && totalEventsFee > 0) {
+      overallPaymentStatus = "Approved";
+    } else if (totalApprovedAmount > 0 && balanceDue > 0) {
+      overallPaymentStatus = `Partially Paid (Yet to Pay ₹${balanceDue})`;
+    } else if (totalPendingAmount > 0) {
+      overallPaymentStatus = "Pending Approval";
+    } else if (paymentsList.some((p) => p.status === "rejected")) {
+      overallPaymentStatus = "Rejected";
+    } else {
+      overallPaymentStatus = "Unpaid";
+    }
+
+    result.push({
+      _id: college._id,
+      collegeName: college.collegeName,
+      registeredTeamsCount: teamsList.length,
+      maxAllowedTeams: 2,
+      totalRegisteredUsers: users.length,
+      teams: teamsList,
+      team1: teamsList[0] || null,
+      team2: teamsList[1] || null,
+      eventsCount: allCollegeEventsList.length,
+      events: allCollegeEventsList,
+      unpaidEventsCount: allCollegeEventsList.filter((e) => e.isYetToPay).length,
+      paidEventsCount: allCollegeEventsList.filter((e) => !e.isYetToPay).length,
+      paymentsCount: paymentsList.length,
+      payments: paymentsList,
+      financialSummary: {
+        totalEventsFee,
+        totalPaymentsSubmitted,
+        totalApprovedAmount,
+        totalPendingAmount,
+        balanceDue,
+        yetToPay: balanceDue,
+        overallPaymentStatus,
+      },
+      createdAt: college.createdAt,
+    });
+  }
+
+  return result;
+};
+
+// ============================================================================
+// 6. EXCEL EXPORT: COMPREHENSIVE COLLEGE DETAILS (WITH ALL EVENTS & PAYMENTS)
+// ============================================================================
+
+// @desc    Export Comprehensive Excel file for a single college or all colleges with all events and payments
+// @route   GET /api/admin/export/college-comprehensive (or /api/admin/export/college/:collegeId)
+// @access  Private (Admin / Superadmin)
+const exportCollegeComprehensiveExcel = async (req, res) => {
+  try {
+    const collegeIdentifier = req.params.collegeId || req.query.collegeId || req.query.collegeName || null;
+    const collegesData = await fetchCollegeComprehensiveData(collegeIdentifier);
+
+    if (collegeIdentifier && collegesData.length === 0) {
+      return res.status(404).json({ message: "College not found" });
+    }
+
+    const workbook = new ExcelJS.Workbook();
+    workbook.creator = "Semaphore 2026 Admin";
+    workbook.created = new Date();
+
+    const isSingleCollege = collegesData.length === 1;
+    const mainTitle = isSingleCollege
+      ? `SEMAPHORE 2026 - ${collegesData[0].collegeName.toUpperCase()} FULL REPORT`
+      : "SEMAPHORE 2026 - COLLEGES COMPREHENSIVE REPORT (EVENTS & PAYMENTS)";
+
+    // ------------------------------------------------------------------------
+    // Sheet 1: College(s) Summary & Financial Overview
+    // ------------------------------------------------------------------------
+    const summarySheet = workbook.addWorksheet(
+      sanitizeSheetName("College Summary", "College Summary")
+    );
+    addReportTitle(
+      summarySheet,
+      mainTitle,
+      `Total Colleges: ${collegesData.length} | Includes Teams, Registered Events, Multiple Payments & Yet to Pay Balances`,
+      12
+    );
+
+    const summaryHeaders = [
+      "Sl No",
+      "College Name",
+      "Teams Registered",
+      "Team 1 Name",
+      "Team 1 Leader",
+      "Team 2 Name",
+      "Team 2 Leader",
+      "Total Events",
+      "Total Fee (₹)",
+      "Approved Paid (₹)",
+      "Pending (₹)",
+      "Yet to Pay / Balance (₹)",
+      "Overall Payment Status",
+    ];
+
+    const sHeaderRow = summarySheet.addRow(summaryHeaders);
+    formatHeaderRow(sHeaderRow);
+
+    collegesData.forEach((col, index) => {
+      const t1 = col.team1;
+      const t2 = col.team2;
+      const fin = col.financialSummary;
+
+      const row = summarySheet.addRow([
+        index + 1,
+        col.collegeName,
+        `${col.registeredTeamsCount} / 2`,
+        t1 ? t1.teamName : "No Team",
+        t1 && t1.leader ? `${t1.leader.name} (${t1.leader.phone || t1.leader.email})` : "N/A",
+        t2 ? t2.teamName : "No Second Team",
+        t2 && t2.leader ? `${t2.leader.name} (${t2.leader.phone || t2.leader.email})` : "None",
+        col.eventsCount,
+        fin.totalEventsFee,
+        fin.totalApprovedAmount,
+        fin.totalPendingAmount,
+        fin.yetToPay,
+        fin.overallPaymentStatus,
+      ]);
+
+      const isEven = index % 2 === 1;
+      formatDataRow(row, isEven, {
+        1: { vertical: "middle", horizontal: "center" },
+        3: { vertical: "middle", horizontal: "center" },
+        8: { vertical: "middle", horizontal: "center" },
+        9: { vertical: "middle", horizontal: "right" },
+        10: { vertical: "middle", horizontal: "right" },
+        11: { vertical: "middle", horizontal: "right" },
+        12: { vertical: "middle", horizontal: "right" },
+        13: { vertical: "middle", horizontal: "center" },
+      });
+
+      applyStatusStyle(row.getCell(13), fin.overallPaymentStatus);
+    });
+
+    autoFitColumns(summarySheet, {
+      1: 8,
+      2: 30,
+      3: 18,
+      4: 22,
+      5: 28,
+      6: 22,
+      7: 28,
+      8: 14,
+      9: 16,
+      10: 18,
+      11: 16,
+      12: 24,
+      13: 26,
+    });
+
+    // ------------------------------------------------------------------------
+    // Sheet 2: Teams & Members Roster
+    // ------------------------------------------------------------------------
+    const rosterSheet = workbook.addWorksheet(
+      sanitizeSheetName("Teams & Members", "Teams & Members")
+    );
+    addReportTitle(
+      rosterSheet,
+      "TEAMS & PARTICIPANTS ROSTER",
+      "List of all registered teams, team leaders, participant members, and payment status",
+      13
+    );
+
+    const rosterHeaders = [
+      "Sl No",
+      "College Name",
+      "Team Slot",
+      "Team Name",
+      "Team ID / Code",
+      "Member Name",
+      "Member Phone",
+      "Member Email",
+      "Role",
+      "Registered Events",
+      "Total Fee (₹)",
+      "Approved Paid (₹)",
+      "Yet to Pay (₹)",
+      "Team Payment Status",
+    ];
+
+    const rHeaderRow = rosterSheet.addRow(rosterHeaders);
+    formatHeaderRow(rHeaderRow);
+
+    let rIdx = 1;
+    collegesData.forEach((col) => {
+      col.teams.forEach((team) => {
+        const teamEventsStr = team.events.map((e) => e.title).join(", ") || "None";
+        team.members.forEach((m) => {
+          const row = rosterSheet.addRow([
+            rIdx++,
+            col.collegeName,
+            team.slot,
+            team.teamName,
+            team.teamId,
+            m.name || "N/A",
+            m.phone || "N/A",
+            m.email || "N/A",
+            m.role || "Member",
+            teamEventsStr,
+            team.totalFee,
+            team.amountPaid,
+            team.balanceDue,
+            team.paymentStatus,
+          ]);
+
+          const isEven = rIdx % 2 === 0;
+          formatDataRow(row, isEven, {
+            1: { vertical: "middle", horizontal: "center" },
+            3: { vertical: "middle", horizontal: "center" },
+            5: { vertical: "middle", horizontal: "center" },
+            7: { vertical: "middle", horizontal: "center" },
+            9: { vertical: "middle", horizontal: "center" },
+            11: { vertical: "middle", horizontal: "right" },
+            12: { vertical: "middle", horizontal: "right" },
+            13: { vertical: "middle", horizontal: "right" },
+            14: { vertical: "middle", horizontal: "center" },
+          });
+
+          applyStatusStyle(row.getCell(14), team.paymentStatus);
+        });
+      });
+    });
+
+    autoFitColumns(rosterSheet, {
+      1: 8,
+      2: 30,
+      3: 14,
+      4: 22,
+      5: 20,
+      6: 22,
+      7: 18,
+      8: 26,
+      9: 16,
+      10: 32,
+      11: 16,
+      12: 18,
+      13: 18,
+      14: 26,
+    });
+
+    // ------------------------------------------------------------------------
+    // Sheet 3: Registered Events & Payments Detailed
+    // ------------------------------------------------------------------------
+    const eventsSheet = workbook.addWorksheet(
+      sanitizeSheetName("Registered Events", "Registered Events")
+    );
+    addReportTitle(
+      eventsSheet,
+      "REGISTERED EVENTS & DETAILED PAYMENTS",
+      "Event breakdown with multiple payment transactions, paid amounts, and yet to pay balances",
+      15
+    );
+
+    const eventHeaders = [
+      "Sl No",
+      "College Name",
+      "Team Slot",
+      "Team Name",
+      "Team ID",
+      "Event Title",
+      "Location",
+      "Date",
+      "Fee (₹)",
+      "Amount Paid (₹)",
+      "Yet to Pay (₹)",
+      "Payment Status",
+      "Payment Breakdown (Multiple Payments)",
+      "Payment UTR(s)",
+      "Assigned Participants",
+      "Registered Date",
+    ];
+
+    const eHeaderRow = eventsSheet.addRow(eventHeaders);
+    formatHeaderRow(eHeaderRow);
+
+    let eIdx = 1;
+    collegesData.forEach((col) => {
+      col.events.forEach((ev) => {
+        const participantsStr = ev.participants
+          .map((p) => `${p.name}${p.phone && p.phone !== "N/A" ? ` (${p.phone})` : ""}`)
+          .join(", ");
+
+        const regDateStr = ev.registeredAt
+          ? new Date(ev.registeredAt).toLocaleDateString("en-IN")
+          : "N/A";
+
+        const row = eventsSheet.addRow([
+          eIdx++,
+          col.collegeName,
+          ev.teamSlot,
+          ev.teamName,
+          ev.teamId,
+          ev.title,
+          ev.location,
+          ev.date ? new Date(ev.date).toLocaleDateString("en-IN") : "N/A",
+          ev.registrationFee,
+          ev.amountPaid,
+          ev.balanceDue,
+          ev.paymentStatus,
+          ev.paymentBreakdown,
+          ev.paymentUtr,
+          participantsStr || "Team",
+          regDateStr,
+        ]);
+
+        const isEven = eIdx % 2 === 0;
+        formatDataRow(row, isEven, {
+          1: { vertical: "middle", horizontal: "center" },
+          3: { vertical: "middle", horizontal: "center" },
+          5: { vertical: "middle", horizontal: "center" },
+          8: { vertical: "middle", horizontal: "center" },
+          9: { vertical: "middle", horizontal: "right" },
+          10: { vertical: "middle", horizontal: "right" },
+          11: { vertical: "middle", horizontal: "right" },
+          12: { vertical: "middle", horizontal: "center" },
+          16: { vertical: "middle", horizontal: "center" },
+        });
+
+        applyStatusStyle(row.getCell(12), ev.paymentStatus);
+      });
+    });
+
+    autoFitColumns(eventsSheet, {
+      1: 8,
+      2: 30,
+      3: 14,
+      4: 22,
+      5: 18,
+      6: 24,
+      7: 18,
+      8: 14,
+      9: 12,
+      10: 16,
+      11: 16,
+      12: 24,
+      13: 45,
+      14: 22,
+      15: 36,
+      16: 16,
+    });
+
+    // ------------------------------------------------------------------------
+    // Sheet 4: All Payment Transactions
+    // ------------------------------------------------------------------------
+    const paymentsSheet = workbook.addWorksheet(
+      sanitizeSheetName("Payment Details", "Payment Details")
+    );
+    addReportTitle(
+      paymentsSheet,
+      "COLLEGE PAYMENT TRANSACTIONS & PROOF",
+      "Full audit trail of all payment submissions, UTR numbers, amounts, approval status, and remarks",
+      12
+    );
+
+    const paymentHeaders = [
+      "Sl No",
+      "College Name",
+      "Team Name",
+      "Team ID",
+      "Paid By (User)",
+      "Payer Email",
+      "Amount (₹)",
+      "UTR Number",
+      "Payment Status",
+      "Admin Remarks",
+      "Approved By",
+      "Payment Date",
+    ];
+
+    const pHeaderRow = paymentsSheet.addRow(paymentHeaders);
+    formatHeaderRow(pHeaderRow);
+
+    let pIdx = 1;
+    collegesData.forEach((col) => {
+      col.payments.forEach((pay) => {
+        const payDateStr = pay.createdAt
+          ? new Date(pay.createdAt).toLocaleString("en-IN", { timeZone: "Asia/Kolkata" })
+          : "N/A";
+
+        const row = paymentsSheet.addRow([
+          pIdx++,
+          col.collegeName,
+          pay.teamName,
+          pay.teamId,
+          pay.paidBy ? pay.paidBy.name : "N/A",
+          pay.paidBy ? pay.paidBy.email : "N/A",
+          pay.amount,
+          pay.utr || "N/A",
+          pay.status.toUpperCase(),
+          pay.message || "None",
+          pay.approvedByName,
+          payDateStr,
+        ]);
+
+        const isEven = pIdx % 2 === 0;
+        formatDataRow(row, isEven, {
+          1: { vertical: "middle", horizontal: "center" },
+          4: { vertical: "middle", horizontal: "center" },
+          7: { vertical: "middle", horizontal: "right" },
+          8: { vertical: "middle", horizontal: "center" },
+          9: { vertical: "middle", horizontal: "center" },
+          12: { vertical: "middle", horizontal: "center" },
+        });
+
+        applyStatusStyle(row.getCell(9), pay.status);
+      });
+    });
+
+    autoFitColumns(paymentsSheet, {
+      1: 8,
+      2: 30,
+      3: 22,
+      4: 18,
+      5: 22,
+      6: 26,
+      7: 14,
+      8: 22,
+      9: 16,
+      10: 26,
+      11: 22,
+      12: 24,
+    });
+
+    const buffer = await workbook.xlsx.writeBuffer();
+    const timestamp = new Date().toISOString().slice(0, 10);
+    const filename = isSingleCollege
+      ? `Semaphore2026_${collegesData[0].collegeName.replace(/\s+/g, "_")}_Full_Details_${timestamp}.xlsx`
+      : `Semaphore2026_Colleges_Comprehensive_Details_${timestamp}.xlsx`;
+
+    res.setHeader(
+      "Content-Type",
+      "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+    );
+    res.setHeader("Content-Disposition", `attachment; filename="${filename}"`);
+    res.status(200).send(buffer);
+  } catch (error) {
+    console.error("Export College Comprehensive Excel Error:", error);
+    res.status(500).json({ message: error.message });
+  }
+};
+
+// @desc    Get College comprehensive data (including all events and payments) as JSON
+// @route   GET /api/admin/reports/college-comprehensive (or /api/admin/reports/college/:collegeId)
+// @access  Private (Admin / Superadmin)
+const getCollegeComprehensiveJson = async (req, res) => {
+  try {
+    const collegeIdentifier = req.params.collegeId || req.query.collegeId || req.query.collegeName || null;
+    const colleges = await fetchCollegeComprehensiveData(collegeIdentifier);
+
+    res.status(200).json({
+      count: colleges.length,
+      colleges,
+    });
+  } catch (error) {
+    console.error("Get College Comprehensive JSON Error:", error);
+    res.status(500).json({ message: error.message });
+  }
+};
+
 // @desc    Get Event participants report as JSON
 // @route   GET /api/admin/reports/events
 // @access  Private (Admin / Superadmin)
@@ -1276,11 +2035,15 @@ module.exports = {
   exportEventsExcel,
   exportCollegesExcel,
   exportMasterExcel,
+  exportCollegeComprehensiveExcel,
   getTeamsReportJson,
   getEventsReportJson,
   getCollegesReportJson,
+  getCollegeComprehensiveJson,
   getReportsSummaryJson,
   fetchAllTeamsData,
   fetchAllEventsData,
   fetchAllCollegesData,
+  fetchCollegeComprehensiveData,
 };
+

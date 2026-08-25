@@ -5,10 +5,12 @@ const {
   fetchAllTeamsData,
   fetchAllEventsData,
   fetchAllCollegesData,
+  fetchCollegeComprehensiveData,
   exportTeamsExcel,
   exportEventsExcel,
   exportCollegesExcel,
   exportMasterExcel,
+  exportCollegeComprehensiveExcel,
 } = require("../controllers/adminExportController");
 
 const runTest = async () => {
@@ -25,6 +27,9 @@ const runTest = async () => {
 
     const colleges = await fetchAllCollegesData();
     console.log(`✓ fetchAllCollegesData returned ${colleges.length} colleges`);
+
+    const comprehensive = await fetchCollegeComprehensiveData();
+    console.log(`✓ fetchCollegeComprehensiveData returned ${comprehensive.length} colleges with full details`);
 
     console.log("\n--- Testing Excel Generation Handlers (Mocking req/res) ---");
 
@@ -65,6 +70,9 @@ const runTest = async () => {
 
     // 4. Test Master All-In-One Excel Export
     await exportMasterExcel({}, createMockRes("Master All-In-One Excel Export"));
+
+    // 5. Test College Comprehensive Excel Export
+    await exportCollegeComprehensiveExcel({ params: {}, query: {} }, createMockRes("College Comprehensive Excel Export"));
 
     console.log("\n ALL TESTS PASSED SUCCESSFULLY!");
     process.exit(0);

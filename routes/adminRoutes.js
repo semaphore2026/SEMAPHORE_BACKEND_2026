@@ -22,9 +22,11 @@ const {
   exportEventsExcel,
   exportCollegesExcel,
   exportMasterExcel,
+  exportCollegeComprehensiveExcel,
   getTeamsReportJson,
   getEventsReportJson,
   getCollegesReportJson,
+  getCollegeComprehensiveJson,
   getReportsSummaryJson,
 } = require("../controllers/adminExportController");
 const {
@@ -102,7 +104,13 @@ router.get("/export/event-participants/:eventId", protectAdmin, exportEventsExce
 router.get("/export/colleges", protectAdmin, exportCollegesExcel);
 router.get("/export/college-teams", protectAdmin, exportCollegesExcel); // Alias
 
-// 4. Master Consolidated All-In-One Excel Export
+// 4. College Comprehensive Export (All Events & All Payments Details)
+router.get("/export/college-comprehensive", protectAdmin, exportCollegeComprehensiveExcel);
+router.get("/export/college-comprehensive/:collegeId", protectAdmin, exportCollegeComprehensiveExcel);
+router.get("/export/college-details", protectAdmin, exportCollegeComprehensiveExcel); // Alias
+router.get("/export/college/:collegeId", protectAdmin, exportCollegeComprehensiveExcel); // Single college export
+
+// 5. Master Consolidated All-In-One Excel Export
 router.get("/export/all", protectAdmin, exportMasterExcel);
 router.get("/export/master", protectAdmin, exportMasterExcel); // Alias
 
@@ -110,6 +118,9 @@ router.get("/export/master", protectAdmin, exportMasterExcel); // Alias
 router.get("/reports/teams", protectAdmin, getTeamsReportJson);
 router.get("/reports/events", protectAdmin, getEventsReportJson);
 router.get("/reports/colleges", protectAdmin, getCollegesReportJson);
+router.get("/reports/college-comprehensive", protectAdmin, getCollegeComprehensiveJson);
+router.get("/reports/college-comprehensive/:collegeId", protectAdmin, getCollegeComprehensiveJson);
+router.get("/reports/college/:collegeId", protectAdmin, getCollegeComprehensiveJson); // Alias
 router.get("/reports/summary", protectAdmin, getReportsSummaryJson);
 
 module.exports = router;
