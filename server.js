@@ -18,6 +18,9 @@ connectDB();
 
 const app = express();
 
+// Trust reverse proxy (AWS EC2 / Nginx / ALB)
+app.set("trust proxy", true);
+
 // Middleware - Allow all origins unconditionally on CORS policy
 const corsOptions = {
   origin: true, // Automatically reflects any requesting origin (allows all origins and works with credentials)
