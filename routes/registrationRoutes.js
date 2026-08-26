@@ -17,6 +17,8 @@ const {
 const {
   updatePaymentStatusWithMessage,
   deletePayment,
+  getBackupPayments,
+  getBackupPaymentDetails,
 } = require("../controllers/adminController");
 const { protect } = require("../middleware/authMiddleware");
 const { upload } = require("../config/cloudinary");
@@ -75,6 +77,11 @@ router.get("/total-teams", protectAnyAdmin, getTotalTeams);
 router.get("/stats", protectAnyAdmin, getRegistrationStats);
 router.get("/payments/pending", protectAnyAdmin, getPendingPayments);
 router.get("/payments/approved", protectAnyAdmin, getApprovedPayments);
+
+// Backup Payments Routes (Read-Only)
+router.get("/payments/backups", protectAnyAdmin, getBackupPayments);
+router.get("/payments/backups/:backupId", protectAnyAdmin, getBackupPaymentDetails);
+router.get("/payment/backups/:backupId", protectAnyAdmin, getBackupPaymentDetails);
 
 // Admin Protected Routes (Requires Admin JWT header)
 router.put("/:id/payment-status", protectAnyAdmin, updatePaymentStatusWithMessage);

@@ -2,9 +2,15 @@ const mongoose = require("mongoose");
 const Admin = require("../models/Admin");
 const User = require("../models/User");
 const College = require("../models/College");
+const Team = require("../models/Team");
 const Payment = require("../models/Payment");
 const EventRegistration = require("../models/EventRegistrations");
 const Event = require("../models/Event");
+const PaymentBackup = require("../models/PaymentBackup");
+const EventRegistrationBackup = require("../models/EventRegistrationBackup");
+const BackupRecord = require("../models/BackupRecord");
+const { createBackupForPayment } = require("../utils/backupHelper");
+
 
 // @desc    Admin / Superadmin Login
 // @route   POST /api/admin/login
@@ -546,6 +552,14 @@ const deletePayment = async (req, res) => {
       return res.status(404).json({ message: "Payment record not found" });
     }
 
+    // Auto-create Payment & EventRegistration Backups linked in BackupRecord
+    const deletedByAdmin = req.admin
+      ? req.admin._id
+      : req.user
+      ? req.user._id
+      : null;
+    const backupRecord = await createBackupForPayment(payment, deletedByAdmin);
+
     // Collect query IDs for payment (string & ObjectId)
     const targetPaymentObjId = new mongoose.Types.ObjectId(payment._id);
     const targetPaymentStr = payment._id.toString();
@@ -637,6 +651,8 @@ const deletePayment = async (req, res) => {
         imageUrl: payment.imageUrl,
         createdAt: payment.createdAt,
       },
+      backupRecordId: backupRecord ? backupRecord._id : null,
+      backupCreated: !!backupRecord,
       affectedRegistrationsCount: affectedRegistrations.length,
       affectedRegistrations: validUpdatedRegsList,
     });
@@ -950,6 +966,242 @@ const getUserFullDetailsForAdmin = async (req, res) => {
   }
 };
 
+// ================= BACKUP PAYMENTS RETRIEVAL CONTROLLERS (READ-ONLY) =================
+
+// @desc    Get recent backup payments list (read-only)
+// @route   GET /api/admin/backup-payments (also /api/admin/payments/backups)
+// @access  Private (Admin / Superadmin)
+const getBackupPayments = async (req, res) => {
+  try {
+    const backupRecords = await BackupRecord.find()
+      .populate({
+        path: "paymentBackup",
+        populate: [
+          {
+            path: "user",
+            select: "name email collegeName avatar college teamid",
+            populate: [{ path: "teamid" }, { path: "college" }],
+          },
+          { path: "approvedBy", select: "name email role" },
+        ],
+      })
+      .populate({
+        path: "eventRegistrationBackups",
+        populate: { path: "eventId", select: "title registrationFee actualPrice" },
+      })
+      .sort({ deletedAt: -1 });
+
+    const formattedBackupPayments = backupRecords.map((record) => {
+      const pb = record.paymentBackup || {};
+      const u = pb.user || {};
+      const regBackups = Array.isArray(record.eventRegistrationBackups)
+        ? record.eventRegistrationBackups
+        : [];
+
+      return {
+        backupId: record._id,
+        backupRecordId: record._id,
+        originalPaymentId: record.originalPaymentId,
+        paymentBackupId: pb._id,
+        paymentid: pb._id,
+        _id: pb._id,
+        amount: pb.amount || 0,
+        utr: pb.utr || "",
+        imageUrl: pb.imageUrl || "",
+        imageurl: pb.imageUrl || "",
+        status: pb.status || "deleted",
+        message: pb.message || "",
+        approvedBy: pb.approvedBy || null,
+        approved_by: pb.approvedBy || null,
+        timestamp: pb.timestamp || pb.createdAt,
+        deletedAt: record.deletedAt || pb.deletedAt,
+        deletedBy: record.deletedBy || null,
+        createdAt: pb.createdAt || record.createdAt,
+        updatedAt: pb.updatedAt || record.updatedAt,
+        backedUpEventsCount: regBackups.length,
+        user: {
+          _id: u._id,
+          name: u.name,
+          email: u.email,
+          avatar: u.avatar,
+          collegeName: u.collegeName,
+          college: u.college || null,
+          team: u.teamid || null,
+        },
+      };
+    });
+
+    res.status(200).json({
+      count: formattedBackupPayments.length,
+      payments: formattedBackupPayments,
+      backupPayments: formattedBackupPayments,
+    });
+  } catch (error) {
+    console.error("Get Backup Payments Error:", error);
+    res.status(500).json({ message: error.message });
+  }
+};
+
+// @desc    Get backup payment details including backed-up event registrations, user, college, team (read-only)
+// @route   GET /api/admin/backup-payments/:backupId (also /api/admin/payments/backups/:backupId)
+// @access  Private (Admin / Superadmin)
+const getBackupPaymentDetails = async (req, res) => {
+  try {
+    const backupId =
+      req.params.backupId ||
+      req.params.id ||
+      req.query.backupId ||
+      req.query.id;
+
+    if (!backupId) {
+      return res.status(400).json({ message: "Please provide backupId" });
+    }
+
+    if (!mongoose.Types.ObjectId.isValid(backupId)) {
+      return res.status(400).json({ message: "Invalid backupId format" });
+    }
+
+    // Try finding by BackupRecord _id, paymentBackup, or originalPaymentId
+    let record = await BackupRecord.findOne({
+      $or: [
+        { _id: backupId },
+        { paymentBackup: backupId },
+        { originalPaymentId: backupId },
+      ],
+    })
+      .populate({
+        path: "paymentBackup",
+        populate: [
+          {
+            path: "user",
+            select: "name email collegeName avatar college teamid",
+            populate: [{ path: "teamid" }, { path: "college" }],
+          },
+          { path: "approvedBy", select: "name email role" },
+        ],
+      })
+      .populate({
+        path: "eventRegistrationBackups",
+        populate: { path: "eventId" },
+      });
+
+    // Fallback: search directly in PaymentBackup if record not found
+    let pbDoc = null;
+    let regBackups = [];
+
+    if (record && record.paymentBackup) {
+      pbDoc = record.paymentBackup;
+      regBackups = record.eventRegistrationBackups || [];
+    } else {
+      pbDoc = await PaymentBackup.findById(backupId)
+        .populate({
+          path: "user",
+          select: "name email collegeName avatar college teamid",
+          populate: [{ path: "teamid" }, { path: "college" }],
+        })
+        .populate("approvedBy", "name email role");
+
+      if (!pbDoc) {
+        return res.status(404).json({ message: "Backup payment record not found" });
+      }
+
+      regBackups = await EventRegistrationBackup.find({
+        $or: [
+          { userId: pbDoc.user ? pbDoc.user._id : null },
+          { paymentId: { $in: [pbDoc.originalPaymentId] } },
+        ],
+      }).populate("eventId");
+    }
+
+    const u = pbDoc.user || {};
+
+    const events = regBackups.map((r) => {
+      const ev = r.eventId || {};
+      const isEvObj = typeof ev === "object" && ev !== null && ev._id;
+
+      const participants = Array.isArray(r.participants)
+        ? r.participants.map((p) => ({
+            name: p && p.name ? String(p.name).trim() : "",
+            phone: p && p.phone ? String(p.phone).trim() : "",
+            ...(p && p.email ? { email: String(p.email).trim() } : {}),
+          }))
+        : [];
+
+      return {
+        _id: r._id,
+        backupRegistrationId: r._id,
+        originalRegistrationId: r.originalRegistrationId,
+        registrationId: r.originalRegistrationId || r._id,
+        eventId: isEvObj ? ev._id : ev,
+        title: ev.title || "",
+        description: ev.description || "",
+        actualPrice:
+          typeof ev.registrationFee === "number"
+            ? ev.registrationFee
+            : ev.actualPrice || 0,
+        registrationFee:
+          typeof ev.registrationFee === "number"
+            ? ev.registrationFee
+            : ev.actualPrice || 0,
+        image: ev.image || "",
+        imageUrl: ev.image || "",
+        location: ev.location || "",
+        date: ev.date || null,
+        timings: ev.timings || "",
+        minParticipants: ev.minParticipants || 1,
+        maxParticipants: ev.maxParticipants || 1,
+        participantsCount: participants.length,
+        participants: participants,
+        paymentId: r.paymentId || [],
+        createdAt: r.createdAt,
+        updatedAt: r.updatedAt,
+        event: isEvObj ? ev : null,
+      };
+    });
+
+    res.status(200).json({
+      backupRecordId: record ? record._id : null,
+      originalPaymentId: pbDoc.originalPaymentId,
+      payment: {
+        backupid: pbDoc._id,
+        paymentid: pbDoc.originalPaymentId,
+        _id: pbDoc._id,
+        originalPaymentId: pbDoc.originalPaymentId,
+        user: pbDoc.user,
+        amount: pbDoc.amount,
+        utr: pbDoc.utr,
+        imageUrl: pbDoc.imageUrl,
+        imageurl: pbDoc.imageUrl,
+        status: pbDoc.status,
+        message: pbDoc.message || "",
+        approvedBy: pbDoc.approvedBy || null,
+        approved_by: pbDoc.approvedBy || null,
+        timestamp: pbDoc.timestamp || pbDoc.createdAt,
+        deletedAt: record ? record.deletedAt : pbDoc.deletedAt,
+        deletedBy: record ? record.deletedBy : pbDoc.deletedBy,
+        createdAt: pbDoc.createdAt,
+        updatedAt: pbDoc.updatedAt,
+      },
+      user: {
+        _id: u._id,
+        name: u.name,
+        email: u.email,
+        avatar: u.avatar,
+        collegeName: u.collegeName,
+      },
+      college: u.college || null,
+      team: u.teamid || null,
+      eventsCount: events.length,
+      events: events,
+      associatedEvents: events,
+      registeredEvents: events,
+    });
+  } catch (error) {
+    console.error("Get Backup Payment Details Error:", error);
+    res.status(500).json({ message: error.message });
+  }
+};
+
 module.exports = {
   loginAdmin,
   addAdmin,
@@ -967,6 +1219,9 @@ module.exports = {
   getUserEventsWithDetails,
   getEventParticipantsByEventAndUser,
   getUserFullDetailsForAdmin,
+  getBackupPayments,
+  getBackupPaymentDetails,
 };
+
 
 

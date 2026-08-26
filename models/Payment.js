@@ -64,6 +64,41 @@ paymentSchema.virtual("approved_by").get(function () {
   return this.approvedBy;
 });
 
+// Internal Auto-Backup Middleware on Payment deletion
+paymentSchema.pre("findOneAndDelete", async function () {
+  try {
+    const { createBackupForPayment } = require("../utils/backupHelper");
+    const docToQuery = await this.model.findOne(this.getQuery());
+    if (docToQuery) {
+      await createBackupForPayment(docToQuery);
+    }
+  } catch (err) {
+    console.error("Payment pre-findOneAndDelete auto-backup error:", err);
+  }
+});
+
+paymentSchema.pre("deleteOne", { document: true, query: false }, async function () {
+  try {
+    const { createBackupForPayment } = require("../utils/backupHelper");
+    await createBackupForPayment(this);
+  } catch (err) {
+    console.error("Payment pre-deleteOne auto-backup error:", err);
+  }
+});
+
+paymentSchema.pre("deleteOne", { document: false, query: true }, async function () {
+  try {
+    const { createBackupForPayment } = require("../utils/backupHelper");
+    const docs = await this.model.find(this.getQuery());
+    for (const doc of docs) {
+      await createBackupForPayment(doc);
+    }
+  } catch (err) {
+    console.error("Payment pre-deleteOne query auto-backup error:", err);
+  }
+});
+
 const Payment = mongoose.model("Payment", paymentSchema);
 
 module.exports = Payment;
+

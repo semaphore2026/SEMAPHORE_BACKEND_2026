@@ -17,6 +17,8 @@ const {
   getUserEventsWithDetails,
   getEventParticipantsByEventAndUser,
   getUserFullDetailsForAdmin,
+  getBackupPayments,
+  getBackupPaymentDetails,
 } = require("../controllers/adminController");
 const {
   exportTeamsExcel,
@@ -96,6 +98,15 @@ router.put("/payments/:paymentId/status", protectAdmin, updatePaymentStatusWithM
 router.delete("/payments/:paymentId", protectAdmin, deletePayment);
 router.delete("/payment/:paymentId", protectAdmin, deletePayment); // Alias
 router.delete("/payments", protectAdmin, deletePayment); // Alias
+
+// ================= BACKUP PAYMENTS RETRIEVAL ROUTES (READ-ONLY) =================
+router.get("/backup-payments", protectAdmin, getBackupPayments);
+router.get("/payments/backups", protectAdmin, getBackupPayments); // Alias
+router.get("/backups", protectAdmin, getBackupPayments); // Alias
+
+router.get("/backup-payments/:backupId", protectAdmin, getBackupPaymentDetails);
+router.get("/payments/backups/:backupId", protectAdmin, getBackupPaymentDetails); // Alias
+router.get("/backup-details/:backupId", protectAdmin, getBackupPaymentDetails); // Alias
 
 // ================= EXCEL EXPORT ROUTES =================
 // 1. Teams & Participants Excel Export
