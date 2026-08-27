@@ -13,6 +13,7 @@ const {
   getRegistrationStats,
   getTotalUsers,
   getTotalTeams,
+  checkUserPaymentStatus,
 } = require("../controllers/registrationController");
 const {
   updatePaymentStatusWithMessage,
@@ -70,6 +71,14 @@ router.get("/user", protect, getUserRegistrations); // Alias route
 
 router.post("/payment", protect, upload.any(), makePayment);
 router.post("/pay", protect, upload.any(), makePayment); // Alias route
+
+// Check if user has an approved payment
+router.get("/is-payment-done", protect, checkUserPaymentStatus);
+router.get("/payment-status", protect, checkUserPaymentStatus); // Alias route
+router.get("/is-payment-approved", protect, checkUserPaymentStatus); // Alias route
+router.get("/check-payment", protect, checkUserPaymentStatus); // Alias route
+router.get("/payment/is-done", protect, checkUserPaymentStatus); // Alias route
+
 
 // Admin Payment & Registration Analytics Routes (Requires Admin JWT header)
 router.get("/total-users", protectAnyAdmin, getTotalUsers);

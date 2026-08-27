@@ -526,6 +526,94 @@ const getTotalTeams = async (req, res) => {
   }
 };
 
+// @desc    Check if user (or user's team) has any approved payment
+// @route   GET /api/registrations/is-payment-done (and aliases /payment-status, /is-payment-approved, /check-payment)
+// @access  Private (User)
+const checkUserPaymentStatus = async (req, res) => {
+  try {
+    const userId = req.user._id;
+
+    // Collect all relevant user IDs (current user and team members if teamid is set)
+    let userIds = [userId];
+    const currentUser = await User.findById(userId);
+    if (currentUser && currentUser.teamid) {
+      const teamMembers = await User.find({ teamid: currentUser.teamid }).select("_id");
+      userIds = Array.from(new Set([...userIds, ...teamMembers.map((m) => m._id.toString())]));
+    }
+
+    // 1. Find direct payments for user or team members
+    const directPayments = await Payment.find({
+      user: { $in: userIds },
+    }).sort({ createdAt: -1 });
+
+    // 2. Find payments linked via EventRegistrations for user or team members
+    const userRegistrations = await EventRegistration.find({
+      userId: { $in: userIds },
+    }).populate("paymentId");
+
+    const linkedPaymentIds = new Set();
+    userRegistrations.forEach((reg) => {
+      if (Array.isArray(reg.paymentId)) {
+        reg.paymentId.forEach((p) => {
+          if (p && p._id) {
+            linkedPaymentIds.add(p._id.toString());
+          }
+        });
+      }
+    });
+
+    let extraPayments = [];
+    if (linkedPaymentIds.size > 0) {
+      extraPayments = await Payment.find({
+        _id: { $in: Array.from(linkedPaymentIds) },
+      }).sort({ createdAt: -1 });
+    }
+
+    // Combine and deduplicate payments
+    const allPaymentMap = new Map();
+    [...directPayments, ...extraPayments].forEach((p) => {
+      if (p && p._id) {
+        allPaymentMap.set(p._id.toString(), p);
+      }
+    });
+
+    const allPayments = Array.from(allPaymentMap.values());
+
+    // Check if any payment status is 'approved' or 'verified'
+    const approvedPayments = allPayments.filter((p) => {
+      const st = String(p.status || "").toLowerCase().trim();
+      return st === "approved" || st === "verified";
+    });
+
+    const isPaymentDone = approvedPayments.length > 0;
+    const latestPayment = allPayments.length > 0 ? allPayments[0] : null;
+
+    res.status(200).json({
+      success: true,
+      is_payment_done: isPaymentDone,
+      isPaymentDone: isPaymentDone,
+      is_payment_approved: isPaymentDone,
+      hasApprovedPayment: isPaymentDone,
+      status: isPaymentDone
+        ? "approved"
+        : latestPayment
+        ? latestPayment.status
+        : "none",
+      message: isPaymentDone
+        ? "Payment is approved"
+        : latestPayment
+        ? `Payment status is '${latestPayment.status}'`
+        : "No payments submitted yet",
+      approvedPaymentCount: approvedPayments.length,
+      totalPaymentsCount: allPayments.length,
+      payments: allPayments,
+    });
+  } catch (error) {
+    console.error("Check User Payment Status Error:", error);
+    res.status(500).json({ message: error.message });
+  }
+};
+
 module.exports = {
   addEventsToRegistration,
   getUserRegistrations,
@@ -536,4 +624,6 @@ module.exports = {
   getRegistrationStats,
   getTotalUsers,
   getTotalTeams,
+  checkUserPaymentStatus,
 };
+
