@@ -8,14 +8,20 @@ const connectDB = require("./config/db");
 const authRoutes = require("./routes/authRoutes");
 const eventRoutes = require("./routes/eventRoutes");
 const collegeRoutes = require("./routes/collegeRoutes");
+const allowedCollegeRoutes = require("./routes/allowedCollegeRoutes");
 const adminRoutes = require("./routes/adminRoutes");
 const timetableRoutes = require("./routes/timetableRoutes");
 const registrationRoutes = require("./routes/registrationRoutes");
 const teamRoutes = require("./routes/teamRoutes");
 const teamRulesRoutes = require("./routes/teamRulesRoutes");
+const { seedInitialRecord } = require("./controllers/allowedCollegeController");
 
 // Initialize Database Connection
-connectDB();
+connectDB().then(() => {
+  seedInitialRecord();
+}).catch((err) => {
+  console.error("DB connection error:", err);
+});
 
 const app = express();
 
@@ -55,6 +61,8 @@ app.get("/", (req, res) => {
 app.use("/api/auth", authRoutes);
 app.use("/api/events", eventRoutes);
 app.use("/api/colleges", collegeRoutes);
+app.use("/api/allowed-colleges", allowedCollegeRoutes);
+app.use("/api/allowedcolleges", allowedCollegeRoutes);
 app.use("/api/admin", adminRoutes);
 app.use("/api/timetable", timetableRoutes);
 

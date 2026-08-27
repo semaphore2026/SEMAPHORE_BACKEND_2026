@@ -1,6 +1,8 @@
 const jwt = require("jsonwebtoken");
 const User = require("../models/User");
 const College = require("../models/College");
+const AllowedCollege = require("../models/AllowedCollege");
+const CollegeConfig = require("../models/CollegeConfig");
 const Team = require("../models/Team");
 const EventRegistration = require("../models/EventRegistrations");
 const { formatRegistration } = require("../utils/formatRegistration");
@@ -13,22 +15,54 @@ const generateToken = (id) => {
   });
 };
 
-// Helper function to process college assignment and enforce max 2 teams
+// Helper function to process college assignment and enforce max allowed teams
 const handleCollegeRegistration = async (collegeName) => {
   if (!collegeName || !collegeName.trim()) {
     throw { status: 400, message: "Please select a college name to complete registration" };
   }
 
   const cleanName = collegeName.trim();
+
+  // Fetch global config
+  let config = await CollegeConfig.findOne();
+  if (!config) {
+    config = await CollegeConfig.create({
+      defaultMaxTeamsPerCollege: 1,
+      enforceAllowedListOnly: false,
+    });
+  }
+
+  // Fetch specific allowed college record if exists
+  const allowedRecord = await AllowedCollege.findOne({
+    collegeName: { $regex: new RegExp(`^${cleanName}$`, "i") },
+  });
+
+  let maxAllowed = config.defaultMaxTeamsPerCollege || 1;
+
+  if (allowedRecord) {
+    if (!allowedRecord.isActive) {
+      throw {
+        status: 400,
+        message: `Registration failed: '${allowedRecord.collegeName}' is currently not accepting new team registrations.`,
+      };
+    }
+    maxAllowed = allowedRecord.maxTeams;
+  } else if (config.enforceAllowedListOnly) {
+    throw {
+      status: 400,
+      message: `Registration failed: '${cleanName}' is not in the list of allowed colleges.`,
+    };
+  }
+
   let college = await College.findOne({
     collegeName: { $regex: new RegExp(`^${cleanName}$`, "i") },
   });
 
   if (college) {
-    if (college.totalTeams >= 2) {
+    if (college.totalTeams >= maxAllowed) {
       throw {
         status: 400,
-        message: `Registration failed: '${college.collegeName}' has already reached the maximum limit of 2 registered accounts/teams.`,
+        message: `Registration failed: '${college.collegeName}' has already reached the maximum limit of ${maxAllowed} registered accounts/teams.`,
       };
     }
     college.totalTeams += 1;

@@ -12,7 +12,6 @@ const collegeSchema = new mongoose.Schema(
       type: Number,
       default: 0,
       min: [0, "Total teams cannot be less than 0"],
-      max: [2, "A college can have a maximum of 2 teams only"],
     },
   },
   {

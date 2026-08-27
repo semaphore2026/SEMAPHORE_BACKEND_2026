@@ -1,5 +1,7 @@
 const mongoose = require("mongoose");
 const College = require("../models/College");
+const AllowedCollege = require("../models/AllowedCollege");
+const CollegeConfig = require("../models/CollegeConfig");
 const User = require("../models/User");
 const Team = require("../models/Team");
 const Event = require("../models/Event");
@@ -34,12 +36,22 @@ const buildCollegeComprehensiveObject = async (college) => {
     }
   });
 
+  // Fetch dynamic maxAllowedTeams limit for this college
+  let config = await CollegeConfig.findOne();
+  if (!config) {
+    config = { defaultMaxTeamsPerCollege: 1 };
+  }
+  const allowedRecord = await AllowedCollege.findOne({
+    collegeName: { $regex: new RegExp(`^${college.collegeName}$`, "i") },
+  });
+  const maxAllowedTeams = allowedRecord ? allowedRecord.maxTeams : (config.defaultMaxTeamsPerCollege || 1);
+
   const teamsList = [];
   const allCollegeEventsList = [];
   let slotNum = 1;
 
   for (const [teamDocId, group] of teamMap.entries()) {
-    if (slotNum > 2) break; // Max 2 teams limit
+    if (slotNum > maxAllowedTeams) break; // Dynamic max teams limit
 
     const teamObj = group.team;
     const teamUsers = group.users;
@@ -277,7 +289,7 @@ const buildCollegeComprehensiveObject = async (college) => {
     _id: college._id,
     collegeName: college.collegeName,
     registeredTeamsCount: teamsList.length,
-    maxAllowedTeams: 2,
+    maxAllowedTeams: maxAllowedTeams,
     totalRegisteredUsers: users.length,
     teams: teamsList,
     team1: teamsList[0] || null,
