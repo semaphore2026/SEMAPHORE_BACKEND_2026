@@ -141,7 +141,8 @@ const updateEvent = async (req, res) => {
     }
 
     const isCoordinator = event.coordinators && event.coordinators.some(id => id.toString() === req.user._id.toString());
-    if (!isCoordinator && req.user.role !== "admin") {
+    const isAdmin = req.user && (req.user.role === "admin" || req.user.role === "superadmin");
+    if (!isCoordinator && !isAdmin) {
       return res.status(403).json({ success: false, message: "You are not authorized to modify this event" });
     }
 
@@ -201,7 +202,8 @@ const updateCoordinators = async (req, res) => {
     }
 
     const isCoordinator = event.coordinators && event.coordinators.some(id => id.toString() === req.user._id.toString());
-    if (!isCoordinator && req.user.role !== "admin") {
+    const isAdmin = req.user && (req.user.role === "admin" || req.user.role === "superadmin");
+    if (!isCoordinator && !isAdmin) {
       return res.status(403).json({ success: false, message: "You are not authorized to modify this event" });
     }
 
@@ -252,7 +254,8 @@ const updateTimings = async (req, res) => {
     }
 
     const isCoordinator = event.coordinators && event.coordinators.some(id => id.toString() === req.user._id.toString());
-    if (!isCoordinator && req.user.role !== "admin") {
+    const isAdmin = req.user && (req.user.role === "admin" || req.user.role === "superadmin");
+    if (!isCoordinator && !isAdmin) {
       return res.status(403).json({ success: false, message: "You are not authorized to modify this event" });
     }
 
@@ -298,7 +301,8 @@ const deleteEvent = async (req, res) => {
     }
 
     const isCoordinator = event.coordinators && event.coordinators.some(id => id.toString() === req.user._id.toString());
-    if (!isCoordinator && req.user.role !== "admin") {
+    const isAdmin = req.user && (req.user.role === "admin" || req.user.role === "superadmin");
+    if (!isCoordinator && !isAdmin) {
       return res.status(403).json({ success: false, message: "You are not authorized to modify this event" });
     }
 

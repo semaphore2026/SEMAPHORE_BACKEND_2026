@@ -36,6 +36,16 @@ const {
   deleteCollege,
 } = require("../controllers/collegeController");
 const {
+  createEvent,
+  getEvents,
+  getEventById,
+  updateEvent,
+  deleteEvent,
+  updateCoordinators,
+  updateTimings,
+} = require("../controllers/eventController");
+const { upload } = require("../config/cloudinary");
+const {
   protectAdmin,
   superadminOnly,
 } = require("../middleware/adminAuthMiddleware");
@@ -144,5 +154,17 @@ router.get("/reports/summary", protectAdmin, getReportsSummaryJson);
 
 // ================= COLLEGE MANAGEMENT ROUTES =================
 router.delete("/colleges/:id", protectAdmin, deleteCollege);
+
+// ================= EVENT MANAGEMENT ROUTES =================
+// (Requires valid Admin or Superadmin JWT)
+router.post("/events", protectAdmin, upload.single("image"), createEvent);
+router.get("/events", protectAdmin, getEvents);
+router.get("/events/:id", protectAdmin, getEventById);
+router.put("/events/:id", protectAdmin, upload.single("image"), updateEvent);
+router.patch("/events/:id", protectAdmin, upload.single("image"), updateEvent);
+router.patch("/events/:id/coordinators", protectAdmin, updateCoordinators);
+router.patch("/events/:id/timings", protectAdmin, updateTimings);
+router.delete("/events/:id", protectAdmin, deleteEvent);
+router.delete("/event/:id", protectAdmin, deleteEvent); // Alias
 
 module.exports = router;
