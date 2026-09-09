@@ -282,7 +282,7 @@ const makePayment = async (req, res) => {
             phone: p.phone ? String(p.phone).trim() : "",
           }));
         }
-      } catch (e) {}
+      } catch (e) { }
     }
 
     // Collect event IDs for this payment
@@ -418,42 +418,99 @@ const getAllRegistrations = async (req, res) => {
   }
 };
 
-// @desc    Get total pending payments amount
+// Helper to calculate team-based payment metrics (₹2000 fixed fee per participating team)
+const getTeamPaymentMetrics = async () => {
+  const TEAM_PARTICIPATION_FEE = 2000;
+
+  // 1. Fetch approved payments with populated user teamid
+  const approvedPayments = await Payment.find({
+    status: { $in: ["approved", "verified"] },
+  }).populate({
+    path: "user",
+    select: "teamid",
+  });
+
+  const approvedTeamKeys = new Set();
+  approvedPayments.forEach((p) => {
+    if (p.user) {
+      if (p.user.teamid) {
+        const tId =
+          typeof p.user.teamid === "object" && p.user.teamid._id
+            ? p.user.teamid._id.toString()
+            : p.user.teamid.toString();
+        approvedTeamKeys.add(`team_${tId}`);
+      } else {
+        approvedTeamKeys.add(`user_${p.user._id ? p.user._id.toString() : p.user.toString()}`);
+      }
+    } else {
+      approvedTeamKeys.add(`payment_${p._id.toString()}`);
+    }
+  });
+
+  // 2. Fetch pending/submitted payments with populated user teamid
+  const pendingPayments = await Payment.find({
+    status: { $in: ["pending", "submitted"] },
+  }).populate({
+    path: "user",
+    select: "teamid",
+  });
+
+  const pendingTeamKeys = new Set();
+  pendingPayments.forEach((p) => {
+    let key;
+    if (p.user) {
+      if (p.user.teamid) {
+        const tId =
+          typeof p.user.teamid === "object" && p.user.teamid._id
+            ? p.user.teamid._id.toString()
+            : p.user.teamid.toString();
+        key = `team_${tId}`;
+      } else {
+        key = `user_${p.user._id ? p.user._id.toString() : p.user.toString()}`;
+      }
+    } else {
+      key = `payment_${p._id.toString()}`;
+    }
+
+    if (!approvedTeamKeys.has(key)) {
+      pendingTeamKeys.add(key);
+    }
+  });
+
+  const approvedCount = approvedTeamKeys.size;
+  const totalApprovedAmount = approvedCount * TEAM_PARTICIPATION_FEE;
+
+  const pendingCount = pendingTeamKeys.size;
+  const totalPendingAmount = pendingCount * TEAM_PARTICIPATION_FEE;
+
+  return {
+    pendingCount,
+    totalPendingAmount,
+    approvedCount,
+    totalApprovedAmount,
+  };
+};
+
+// @desc    Get total pending payments amount (Team based: 2000 per team under review)
 // @route   GET /api/registrations/payments/pending
 // @access  Private (Admin Only)
 const getPendingPayments = async (req, res) => {
   try {
-    const pendingPayments = await Payment.find({
-      status: { $in: ["pending", "submitted"] },
-    }).select("amount");
-
-    const totalPendingAmount = pendingPayments.reduce(
-      (sum, p) => sum + (p.amount || 0),
-      0
-    );
-
-    res.status(200).json({ totalPendingAmount, count: pendingPayments.length });
+    const { pendingCount, totalPendingAmount } = await getTeamPaymentMetrics();
+    res.status(200).json({ totalPendingAmount, count: pendingCount });
   } catch (error) {
     console.error("Get Pending Payments Error:", error);
     res.status(500).json({ message: error.message });
   }
 };
 
-// @desc    Get total approved payments amount
+// @desc    Get total approved payments amount (Team based: 2000 per approved team)
 // @route   GET /api/registrations/payments/approved
 // @access  Private (Admin Only)
 const getApprovedPayments = async (req, res) => {
   try {
-    const approvedPayments = await Payment.find({
-      status: { $in: ["approved", "verified"] },
-    }).select("amount");
-
-    const totalApprovedAmount = approvedPayments.reduce(
-      (sum, p) => sum + (p.amount || 0),
-      0
-    );
-
-    res.status(200).json({ totalApprovedAmount, count: approvedPayments.length });
+    const { approvedCount, totalApprovedAmount } = await getTeamPaymentMetrics();
+    res.status(200).json({ totalApprovedAmount, count: approvedCount });
   } catch (error) {
     console.error("Get Approved Payments Error:", error);
     res.status(500).json({ message: error.message });
@@ -468,21 +525,12 @@ const getRegistrationStats = async (req, res) => {
     const totalUsers = await User.countDocuments({ role: { $ne: "admin" } });
     const totalTeams = await Team.countDocuments();
 
-    const pendingPayments = await Payment.find({
-      status: { $in: ["pending", "submitted"] },
-    });
-    const totalPendingAmount = pendingPayments.reduce(
-      (sum, p) => sum + (p.amount || 0),
-      0
-    );
-
-    const approvedPayments = await Payment.find({
-      status: { $in: ["approved", "verified"] },
-    });
-    const totalApprovedAmount = approvedPayments.reduce(
-      (sum, p) => sum + (p.amount || 0),
-      0
-    );
+    const {
+      pendingCount,
+      totalPendingAmount,
+      approvedCount,
+      totalApprovedAmount,
+    } = await getTeamPaymentMetrics();
 
     res.status(200).json({
       success: true,
@@ -490,9 +538,9 @@ const getRegistrationStats = async (req, res) => {
       totalUsers,
       totalTeams,
       paymentsSummary: {
-        pendingCount: pendingPayments.length,
+        pendingCount,
         totalPendingAmount,
-        approvedCount: approvedPayments.length,
+        approvedCount,
         totalApprovedAmount,
       },
     });
@@ -597,13 +645,13 @@ const checkUserPaymentStatus = async (req, res) => {
       status: isPaymentDone
         ? "approved"
         : latestPayment
-        ? latestPayment.status
-        : "none",
+          ? latestPayment.status
+          : "none",
       message: isPaymentDone
         ? "Payment is approved"
         : latestPayment
-        ? `Payment status is '${latestPayment.status}'`
-        : "No payments submitted yet",
+          ? `Payment status is '${latestPayment.status}'`
+          : "No payments submitted yet",
       approvedPaymentCount: approvedPayments.length,
       totalPaymentsCount: allPayments.length,
       payments: allPayments,
