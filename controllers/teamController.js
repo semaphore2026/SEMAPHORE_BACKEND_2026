@@ -75,7 +75,61 @@ const getMyTeam = async (req, res) => {
   }
 };
 
+// @desc    Delete user's team or specified team and clear teamid from user(s)
+// @route   DELETE /api/teams/me, DELETE /api/teams/:id, DELETE /api/admin/teams/:id
+// @access  Private (User or Admin)
+const deleteTeam = async (req, res) => {
+  try {
+    const userId = req.user ? req.user._id : null;
+    const isAdmin = !!req.admin || (req.user && req.user.role === "admin");
+
+    if (!userId && !isAdmin) {
+      return res.status(401).json({ message: "Not authorized, token required" });
+    }
+
+    let user = null;
+    if (userId) {
+      user = await User.findById(userId);
+    }
+
+    // Determine target team ID from params, body, or user's assigned teamid
+    const targetTeamId =
+      req.params.id ||
+      req.params.teamId ||
+      (req.body && (req.body.teamId || req.body.id)) ||
+      (user ? user.teamid : null);
+
+    if (!targetTeamId) {
+      return res.status(400).json({ message: "No team associated with user or specified to delete" });
+    }
+
+    // Unassign teamid from all users associated with this team
+    await User.updateMany(
+      { teamid: targetTeamId },
+      { $set: { teamid: null } }
+    );
+
+    // Delete the team document if it exists
+    const deletedTeam = await Team.findByIdAndDelete(targetTeamId);
+
+    // Fetch updated user details if user exists in User collection
+    const updatedUser = user ? await User.findById(userId).select("-password") : null;
+
+    res.status(200).json({
+      message: "Team deleted successfully and user team association cleared",
+      deletedTeam: deletedTeam || null,
+      user: updatedUser,
+    });
+  } catch (error) {
+    console.error("Delete Team Error:", error);
+    res.status(500).json({ message: error.message });
+  }
+};
+
+
 module.exports = {
   setTeam,
   getMyTeam,
+  deleteTeam,
 };
+

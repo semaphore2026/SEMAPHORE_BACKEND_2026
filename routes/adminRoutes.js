@@ -46,9 +46,13 @@ const {
 } = require("../controllers/eventController");
 const { upload } = require("../config/cloudinary");
 const {
+  deleteTeam,
+} = require("../controllers/teamController");
+const {
   protectAdmin,
   superadminOnly,
 } = require("../middleware/adminAuthMiddleware");
+
 
 // Public route
 router.post("/login", loginAdmin);
@@ -165,6 +169,12 @@ router.patch("/events/:id", protectAdmin, upload.single("image"), updateEvent);
 router.patch("/events/:id/coordinators", protectAdmin, updateCoordinators);
 router.patch("/events/:id/timings", protectAdmin, updateTimings);
 router.delete("/events/:id", protectAdmin, deleteEvent);
-router.delete("/event/:id", protectAdmin, deleteEvent); // Alias
+// ================= TEAM MANAGEMENT ROUTES =================
+// (Requires valid Admin or Superadmin JWT)
+router.delete("/teams/:id", protectAdmin, deleteTeam);
+router.delete("/teams/delete-team/:id", protectAdmin, deleteTeam); // Alias
+router.delete("/team/:id", protectAdmin, deleteTeam); // Alias
+router.delete("/teams", protectAdmin, deleteTeam); // Alias
 
 module.exports = router;
+
