@@ -1,5 +1,6 @@
 const Team = require("../models/Team");
 const User = require("../models/User");
+const EventRegistration = require("../models/EventRegistrations");
 
 // @desc    Set or create a unique team for a user
 // @route   POST /api/teams/set-team (also /api/teams)
@@ -101,6 +102,15 @@ const deleteTeam = async (req, res) => {
 
     if (!targetTeamId) {
       return res.status(400).json({ message: "No team associated with user or specified to delete" });
+    }
+
+    // Find all team members associated with this team
+    const teamMembers = await User.find({ teamid: targetTeamId }).select("_id");
+    const memberUserIds = teamMembers.map((m) => m._id);
+
+    // Cascade-delete all event registrations for this team's members
+    if (memberUserIds.length > 0) {
+      await EventRegistration.deleteMany({ userId: { $in: memberUserIds } });
     }
 
     // Unassign teamid from all users associated with this team
