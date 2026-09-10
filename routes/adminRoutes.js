@@ -20,6 +20,7 @@ const {
   getBackupPayments,
   getBackupPaymentDetails,
   getLogs,
+  deleteAdmin,
 } = require("../controllers/adminController");
 const {
   exportTeamsExcel,
@@ -62,10 +63,14 @@ router.post("/login", loginAdmin);
 router.post("/addadmins", protectAdmin, addAdmin);
 router.post("/addadmin", protectAdmin, addAdmin); // Alias
 
-// Protected routes (Superadmin ONLY - change roles)
+// Protected routes (Superadmin ONLY - change roles & delete admins)
 router.put("/makeadmin", protectAdmin, superadminOnly, makeAdmin);
 router.patch("/makeadmin", protectAdmin, superadminOnly, makeAdmin); // Alias
 router.post("/makeadmin", protectAdmin, superadminOnly, makeAdmin); // Alias
+
+router.delete("/admins/:id", protectAdmin, superadminOnly, deleteAdmin);
+router.delete("/delete-admin/:id", protectAdmin, superadminOnly, deleteAdmin); // Alias
+router.delete("/deleteadmin/:id", protectAdmin, superadminOnly, deleteAdmin); // Alias
 
 // Admin profile & list routes
 router.get("/me", protectAdmin, getAdminProfile);

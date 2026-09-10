@@ -1238,6 +1238,45 @@ const getLogs = async (req, res) => {
   }
 };
 
+// @desc    Delete an admin account
+// @route   DELETE /api/admin/admins/:id (also /api/admin/delete-admin/:id, /api/admin/deleteadmin/:id)
+// @access  Private (Superadmin only)
+const deleteAdmin = async (req, res) => {
+  try {
+    const adminId = req.params.id || (req.body && req.body.id);
+
+    if (!adminId) {
+      return res.status(400).json({ message: "Admin ID is required" });
+    }
+
+    // Prevent superadmin from deleting their own account
+    if (req.admin && req.admin._id.toString() === adminId.toString()) {
+      return res.status(400).json({ message: "Superadmin cannot delete their own account" });
+    }
+
+    const adminToDelete = await Admin.findById(adminId);
+    if (!adminToDelete) {
+      return res.status(404).json({ message: "Admin account not found" });
+    }
+
+    await Admin.findByIdAndDelete(adminId);
+
+    res.status(200).json({
+      success: true,
+      message: `Admin account '${adminToDelete.email}' deleted successfully`,
+      deletedAdmin: {
+        _id: adminToDelete._id,
+        name: adminToDelete.name,
+        email: adminToDelete.email,
+        role: adminToDelete.role,
+      },
+    });
+  } catch (error) {
+    console.error("Delete Admin Error:", error);
+    res.status(500).json({ message: error.message });
+  }
+};
+
 module.exports = {
   loginAdmin,
   addAdmin,
@@ -1258,6 +1297,7 @@ module.exports = {
   getBackupPayments,
   getBackupPaymentDetails,
   getLogs,
+  deleteAdmin,
 };
 
 
