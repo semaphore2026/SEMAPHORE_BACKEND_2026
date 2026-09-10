@@ -15,6 +15,8 @@ const registrationRoutes = require("./routes/registrationRoutes");
 const teamRoutes = require("./routes/teamRoutes");
 const teamRulesRoutes = require("./routes/teamRulesRoutes");
 const { seedInitialRecord } = require("./controllers/allowedCollegeController");
+const logger = require("./utils/logger");
+const loggerMiddleware = require("./middleware/loggerMiddleware");
 
 // Initialize Database Connection
 connectDB().then(() => {
@@ -43,6 +45,9 @@ app.use((req, res, next) => {
 
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
+
+// Request Logging Middleware (Logs all requests, transactions, state updates, and errors to console)
+app.use(loggerMiddleware);
 
 // =========================
 // Base Route
@@ -89,7 +94,12 @@ app.use((req, res) => {
 // =========================
 
 app.use((err, req, res, next) => {
-  console.error(err.stack);
+  logger.error(`Unhandled Server Error during ${req.method} ${req.originalUrl || req.url}`, err, {
+    method: req.method,
+    url: req.originalUrl || req.url,
+    user: req.user || req.admin || null,
+    body: req.body,
+  });
 
   res.status(err.status || 500).json({
     message: err.message || "Internal Server Error",
