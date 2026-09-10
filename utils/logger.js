@@ -57,7 +57,32 @@ const formatPayload = (data) => {
   }
 };
 
-const getTimestamp = () => new Date().toISOString();
+/**
+ * Formats current date & time to Indian Standard Time (IST - Asia/Kolkata)
+ * Example output: "18 Sept 02:08 PM"
+ */
+const getTimestamp = () => {
+  const date = new Date();
+  const options = {
+    timeZone: "Asia/Kolkata",
+    day: "numeric",
+    month: "short",
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: true,
+  };
+  const parts = new Intl.DateTimeFormat("en-IN", options).formatToParts(date);
+
+  let day = "", month = "", hour = "", minute = "", dayPeriod = "";
+  for (const part of parts) {
+    if (part.type === "day") day = part.value;
+    if (part.type === "month") month = part.value;
+    if (part.type === "hour") hour = part.value;
+    if (part.type === "minute") minute = part.value;
+    if (part.type === "dayPeriod") dayPeriod = part.value.toUpperCase();
+  }
+  return `${day} ${month} ${hour}:${minute} ${dayPeriod}`;
+};
 
 const logger = {
   /**
