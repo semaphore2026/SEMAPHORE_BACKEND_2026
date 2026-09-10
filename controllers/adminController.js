@@ -9,6 +9,7 @@ const Event = require("../models/Event");
 const PaymentBackup = require("../models/PaymentBackup");
 const EventRegistrationBackup = require("../models/EventRegistrationBackup");
 const BackupRecord = require("../models/BackupRecord");
+const TransactionLog = require("../models/TransactionLog");
 const { createBackupForPayment } = require("../utils/backupHelper");
 
 
@@ -1202,6 +1203,41 @@ const getBackupPaymentDetails = async (req, res) => {
   }
 };
 
+// @desc    Get paginated transaction and error logs (20 records per page by default)
+// @route   GET /api/admin/logs
+// @access  Private (Admin)
+const getLogs = async (req, res) => {
+  try {
+    const page = Math.max(1, parseInt(req.query.page, 10) || 1);
+    const limit = Math.max(1, parseInt(req.query.limit, 10) || 20);
+    const skip = (page - 1) * limit;
+
+    const totalLogs = await TransactionLog.countDocuments();
+    const totalPages = Math.ceil(totalLogs / limit) || 1;
+
+    const logs = await TransactionLog.find()
+      .sort({ createdAt: -1 })
+      .skip(skip)
+      .limit(limit);
+
+    res.json({
+      success: true,
+      pagination: {
+        currentPage: page,
+        totalPages,
+        totalLogs,
+        limit,
+        hasNextPage: page < totalPages,
+        hasPrevPage: page > 1,
+      },
+      logs,
+    });
+  } catch (error) {
+    console.error("Get Logs Error:", error);
+    res.status(500).json({ message: error.message || "Server Error" });
+  }
+};
+
 module.exports = {
   loginAdmin,
   addAdmin,
@@ -1221,6 +1257,7 @@ module.exports = {
   getUserFullDetailsForAdmin,
   getBackupPayments,
   getBackupPaymentDetails,
+  getLogs,
 };
 
 

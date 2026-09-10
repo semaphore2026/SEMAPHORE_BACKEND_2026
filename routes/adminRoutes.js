@@ -19,6 +19,7 @@ const {
   getUserFullDetailsForAdmin,
   getBackupPayments,
   getBackupPaymentDetails,
+  getLogs,
 } = require("../controllers/adminController");
 const {
   exportTeamsExcel,
@@ -175,6 +176,9 @@ router.delete("/teams/:id", protectAdmin, deleteTeam);
 router.delete("/teams/delete-team/:id", protectAdmin, deleteTeam); // Alias
 router.delete("/team/:id", protectAdmin, deleteTeam); // Alias
 router.delete("/teams", protectAdmin, deleteTeam); // Alias
+
+// ================= LOGS MANAGEMENT ROUTES =================
+router.get("/logs", protectAdmin, getLogs);
 
 module.exports = router;
 

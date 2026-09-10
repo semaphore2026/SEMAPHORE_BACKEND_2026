@@ -15,29 +15,68 @@ const SENSITIVE_KEYS = new Set([
 ]);
 
 /**
- * Recursively sanitizes objects to mask sensitive fields like passwords or tokens.
+ * Recursively sanitizes objects to mask sensitive fields like passwords or tokens,
+ * while safely handling circular references, Mongoose documents, and deep nesting.
  * @param {any} data 
+ * @param {WeakSet} [seen]
+ * @param {number} [depth]
  * @returns {any}
  */
-const sanitizeData = (data) => {
+const sanitizeData = (data, seen = new WeakSet(), depth = 0) => {
   if (data === null || data === undefined) return data;
   if (typeof data !== "object") return data;
 
+  // Max recursion depth safety net
+  if (depth > 6) return "[MaxDepth]";
+
+  // Handle circular references
+  if (seen.has(data)) return "[Circular]";
+  seen.add(data);
+
+  // Convert Mongoose documents to plain objects if applicable
+  if (typeof data.toObject === "function") {
+    try {
+      return sanitizeData(data.toObject(), seen, depth);
+    } catch (e) {}
+  } else if (typeof data.toJSON === "function" && !(data instanceof Date)) {
+    try {
+      return sanitizeData(data.toJSON(), seen, depth);
+    } catch (e) {}
+  }
+
+  // Handle special object types
+  if (data instanceof Date) return data.toISOString();
+  if (data instanceof RegExp) return data.toString();
+  if (Buffer.isBuffer(data)) return "[Buffer]";
+  if (data._bsontype || (data.constructor && data.constructor.name === "ObjectId")) {
+    return data.toString();
+  }
+
   if (Array.isArray(data)) {
-    return data.map((item) => sanitizeData(item));
+    return data.map((item) => sanitizeData(item, seen, depth + 1));
   }
 
   const sanitized = {};
   for (const key of Object.keys(data)) {
+    // Skip internal Mongoose or Node private fields except _id
+    if (key.startsWith("$") || (key.startsWith("_") && key !== "_id" && key !== "__v")) {
+      continue;
+    }
+
     const lowerKey = key.toLowerCase();
+    const value = data[key];
+
     if (SENSITIVE_KEYS.has(lowerKey)) {
       sanitized[key] = "********";
-    } else if (typeof data[key] === "object") {
-      sanitized[key] = sanitizeData(data[key]);
+    } else if (value !== null && typeof value === "object") {
+      sanitized[key] = sanitizeData(value, seen, depth + 1);
+    } else if (typeof value === "function") {
+      continue;
     } else {
-      sanitized[key] = data[key];
+      sanitized[key] = value;
     }
   }
+
   return sanitized;
 };
 
@@ -53,7 +92,7 @@ const formatPayload = (data) => {
     const sanitized = sanitizeData(data);
     return JSON.stringify(sanitized);
   } catch (err) {
-    return String(data);
+    return "[Unserializable Data]";
   }
 };
 
@@ -172,6 +211,7 @@ const logger = {
     console.error(``);
   },
 
+  getTimestamp,
   sanitizeData,
   formatPayload,
 };
