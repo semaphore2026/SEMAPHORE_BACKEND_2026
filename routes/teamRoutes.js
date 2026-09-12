@@ -1,6 +1,6 @@
 const express = require("express");
 const router = express.Router();
-const { setTeam, getMyTeam, deleteTeam } = require("../controllers/teamController");
+const { setTeam, getMyTeam, deleteTeam, updateTeamName } = require("../controllers/teamController");
 const { protect } = require("../middleware/authMiddleware");
 
 // Protected User Routes (Header Authorization Required)
@@ -11,7 +11,20 @@ router.post("/", protect, setTeam); // Alias
 router.get("/me", protect, getMyTeam);
 router.get("/my-team", protect, getMyTeam); // Alias
 
+// Update Team Name Routes (Only registered team members allowed)
+router.put("/update-name", protect, updateTeamName);
+router.patch("/update-name", protect, updateTeamName);
+router.put("/updatename", protect, updateTeamName); // Alias
+router.patch("/updatename", protect, updateTeamName); // Alias
+router.put("/rename", protect, updateTeamName); // Alias
+router.patch("/rename", protect, updateTeamName); // Alias
+router.put("/me", protect, updateTeamName); // Alias
+router.patch("/me", protect, updateTeamName); // Alias
+router.put("/:id", protect, updateTeamName); // Alias by Team ID
+router.patch("/:id", protect, updateTeamName); // Alias by Team ID
+
 router.delete("/me", protect, deleteTeam);
+
 router.delete("/delete-team", protect, deleteTeam); // Alias
 router.delete("/deleteteam", protect, deleteTeam); // Alias
 router.delete("/", protect, deleteTeam); // Alias

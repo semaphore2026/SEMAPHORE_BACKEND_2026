@@ -136,10 +136,80 @@ const deleteTeam = async (req, res) => {
   }
 };
 
+// @desc    Update team name for the user registered with that team
+// @route   PUT /api/teams/update-name (also /me, /rename, /:id)
+// @access  Private (User - Header Authorization required)
+const updateTeamName = async (req, res) => {
+  try {
+    const userId = req.user ? req.user._id : null;
+
+    if (!userId) {
+      return res.status(401).json({ message: "Not authorized, user token required" });
+    }
+
+    const user = await User.findById(userId);
+    if (!user || !user.teamid) {
+      return res.status(400).json({ message: "You are not registered with any team" });
+    }
+
+    const targetTeamId =
+      req.params.id ||
+      req.params.teamId ||
+      (req.body && (req.body.teamId || req.body.id));
+
+    if (targetTeamId && targetTeamId.toString() !== user.teamid.toString()) {
+      return res.status(403).json({
+        message: "Access denied. You can only edit the team name for the team you are registered with.",
+      });
+    }
+
+    const { teamName, name, newName } = req.body;
+    const inputName = teamName || name || newName;
+
+    if (!inputName || !String(inputName).trim()) {
+      return res.status(400).json({ message: "Please provide a valid new team name in the request body" });
+    }
+
+    const cleanName = String(inputName).trim();
+
+    // Check if team name already exists for another team (case-insensitive)
+    const existingTeam = await Team.findOne({
+      _id: { $ne: user.teamid },
+      name: { $regex: new RegExp(`^${cleanName.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}$`, "i") },
+    });
+
+    if (existingTeam) {
+      return res.status(400).json({
+        message: `Team name must be unique. A team named '${cleanName}' already exists.`,
+      });
+    }
+
+    // Update ONLY the team name property
+    const updatedTeam = await Team.findByIdAndUpdate(
+      user.teamid,
+      { name: cleanName },
+      { new: true, runValidators: true }
+    );
+
+    if (!updatedTeam) {
+      return res.status(404).json({ message: "Registered team not found" });
+    }
+
+    res.status(200).json({
+      message: "Team name updated successfully",
+      team: updatedTeam,
+    });
+  } catch (error) {
+    console.error("Update Team Name Error:", error);
+    res.status(500).json({ message: error.message });
+  }
+};
 
 module.exports = {
   setTeam,
   getMyTeam,
   deleteTeam,
+  updateTeamName,
 };
+
 
