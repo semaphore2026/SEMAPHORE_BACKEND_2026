@@ -14,6 +14,7 @@ const {
   getTotalUsers,
   getTotalTeams,
   checkUserPaymentStatus,
+  updateRegistration,
 } = require("../controllers/registrationController");
 const {
   updatePaymentStatusWithMessage,
@@ -69,6 +70,16 @@ router.get("/me", protect, getUserRegistrations); // Alias route
 router.get("/my-events", protect, getUserRegistrations); // Alias route
 router.get("/user", protect, getUserRegistrations); // Alias route
 
+// Edit Registration Details Routes (Only user to whom it belongs allowed)
+router.put("/:id", protect, updateRegistration);
+router.patch("/:id", protect, updateRegistration);
+router.put("/update/:id", protect, updateRegistration); // Alias
+router.patch("/update/:id", protect, updateRegistration); // Alias
+router.put("/edit/:id", protect, updateRegistration); // Alias
+router.patch("/edit/:id", protect, updateRegistration); // Alias
+router.put("/event/:eventId", protect, updateRegistration); // Alias by Event ID
+router.patch("/event/:eventId", protect, updateRegistration); // Alias by Event ID
+
 router.post("/payment", protect, upload.any(), makePayment);
 router.post("/pay", protect, upload.any(), makePayment); // Alias route
 
@@ -78,6 +89,7 @@ router.get("/payment-status", protect, checkUserPaymentStatus); // Alias route
 router.get("/is-payment-approved", protect, checkUserPaymentStatus); // Alias route
 router.get("/check-payment", protect, checkUserPaymentStatus); // Alias route
 router.get("/payment/is-done", protect, checkUserPaymentStatus); // Alias route
+
 
 
 // Admin Payment & Registration Analytics Routes (Requires Admin JWT header)

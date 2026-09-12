@@ -1,3 +1,4 @@
+const mongoose = require("mongoose");
 const EventRegistration = require("../models/EventRegistrations");
 const Payment = require("../models/Payment");
 const Event = require("../models/Event");
@@ -662,6 +663,102 @@ const checkUserPaymentStatus = async (req, res) => {
   }
 };
 
+// @desc    Update user's event registration participant details
+// @route   PUT /api/registrations/:id (also /event/:eventId, /update/:id, /edit/:id)
+// @access  Private (User - Header Authorization required)
+const updateRegistration = async (req, res) => {
+  try {
+    const userId = req.user ? req.user._id : null;
+
+    if (!userId) {
+      return res.status(401).json({ message: "Not authorized, user token required" });
+    }
+
+    const { id, registrationId, eventId } = req.params;
+    const targetId = id || registrationId || (req.body && (req.body.registrationId || req.body.id));
+    const targetEventId = eventId || (req.body && req.body.eventId);
+
+    let registration = null;
+
+    if (targetId && mongoose.Types.ObjectId.isValid(targetId)) {
+      registration = await EventRegistration.findById(targetId);
+    }
+
+    // Fallback: search by userId and eventId if eventId provided or targetId is an eventId
+    if (!registration && (targetEventId || targetId)) {
+      const searchEventId = targetEventId || targetId;
+      if (mongoose.Types.ObjectId.isValid(searchEventId)) {
+        registration = await EventRegistration.findOne({
+          userId,
+          eventId: searchEventId,
+        });
+      }
+    }
+
+    if (!registration) {
+      return res.status(404).json({ message: "Event registration not found" });
+    }
+
+    // Security Check: Only allow the user to whom the registration belongs
+    if (registration.userId.toString() !== userId.toString()) {
+      return res.status(403).json({
+        message: "Access denied. You can only edit event registrations that belong to you.",
+      });
+    }
+
+    const { participants } = req.body;
+
+    if (!participants || !Array.isArray(participants)) {
+      return res.status(400).json({
+        message: "Please provide a valid participants array in the request body",
+      });
+    }
+
+    // Format & sanitize input participants
+    const formattedParticipants = participants.map((p) => ({
+      name: p && p.name ? String(p.name).trim() : (typeof p === "string" ? String(p).trim() : ""),
+      phone: p && p.phone ? String(p.phone).trim() : "",
+    }));
+
+    // Fetch associated event to check min & max participant boundaries
+    const event = await Event.findById(registration.eventId);
+    if (event) {
+      const min = event.minParticipants || 1;
+      const max = event.maxParticipants || 100;
+      const count = formattedParticipants.length;
+
+      if (count < min) {
+        return res.status(400).json({
+          message: `Participant count (${count}) is less than the minimum required (${min}) for event '${event.title}'`,
+        });
+      }
+
+      if (count > max) {
+        return res.status(400).json({
+          message: `Participant count (${count}) exceeds the maximum allowed (${max}) for event '${event.title}'`,
+        });
+      }
+    }
+
+    // Update ONLY participants (paymentId, userId, eventId remain unchanged)
+    registration.participants = formattedParticipants;
+    await registration.save();
+
+    // Populate for response
+    const updatedReg = await EventRegistration.findById(registration._id)
+      .populate("eventId")
+      .populate("paymentId");
+
+    res.status(200).json({
+      message: "Event registration details updated successfully",
+      registration: updatedReg,
+    });
+  } catch (error) {
+    console.error("Update Registration Error:", error);
+    res.status(500).json({ message: error.message });
+  }
+};
+
 module.exports = {
   addEventsToRegistration,
   getUserRegistrations,
@@ -673,5 +770,7 @@ module.exports = {
   getTotalUsers,
   getTotalTeams,
   checkUserPaymentStatus,
+  updateRegistration,
 };
+
 
