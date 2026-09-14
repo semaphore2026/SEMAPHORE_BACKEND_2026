@@ -1277,6 +1277,65 @@ const deleteAdmin = async (req, res) => {
   }
 };
 
+// @desc    Delete older N number of logs (oldest logs first)
+// @route   DELETE /api/admin/logs/delete-oldest/:n (also supports query ?n=N or body { n: N })
+// @access  Private (Admin / Superadmin)
+const deleteOlderLogs = async (req, res) => {
+  try {
+    const rawN =
+      req.params.n ||
+      (req.query && (req.query.n || req.query.count || req.query.limit)) ||
+      (req.body && (req.body.n || req.body.count || req.body.limit));
+    const n = parseInt(rawN, 10);
+
+    if (isNaN(n) || n <= 0) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid parameter 'n'. Please provide a positive integer specifying the number of older logs to delete.",
+      });
+    }
+
+    // Find the IDs of the oldest N logs sorted by createdAt ascending
+    const oldestLogs = await TransactionLog.find({}, "_id")
+      .sort({ createdAt: 1 })
+      .limit(n)
+      .lean();
+
+    if (oldestLogs.length === 0) {
+      const remainingLogsCount = await TransactionLog.countDocuments();
+      return res.status(200).json({
+        success: true,
+        message: "No logs found to delete.",
+        deletedCount: 0,
+        requestedN: n,
+        remainingLogsCount,
+      });
+    }
+
+    const idsToDelete = oldestLogs.map((log) => log._id);
+
+    const deleteResult = await TransactionLog.deleteMany({
+      _id: { $in: idsToDelete },
+    });
+
+    const remainingLogsCount = await TransactionLog.countDocuments();
+
+    return res.status(200).json({
+      success: true,
+      message: `Successfully deleted the oldest ${deleteResult.deletedCount} log(s).`,
+      deletedCount: deleteResult.deletedCount,
+      requestedN: n,
+      remainingLogsCount,
+    });
+  } catch (error) {
+    console.error("Delete Older Logs Error:", error);
+    return res.status(500).json({
+      success: false,
+      message: error.message || "Server Error deleting logs",
+    });
+  }
+};
+
 module.exports = {
   loginAdmin,
   addAdmin,
@@ -1297,6 +1356,7 @@ module.exports = {
   getBackupPayments,
   getBackupPaymentDetails,
   getLogs,
+  deleteOlderLogs,
   deleteAdmin,
 };
 

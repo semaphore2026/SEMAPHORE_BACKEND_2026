@@ -14,14 +14,12 @@ const timetableRoutes = require("./routes/timetableRoutes");
 const registrationRoutes = require("./routes/registrationRoutes");
 const teamRoutes = require("./routes/teamRoutes");
 const teamRulesRoutes = require("./routes/teamRulesRoutes");
-const { seedInitialRecord } = require("./controllers/allowedCollegeController");
+
 const logger = require("./utils/logger");
 const loggerMiddleware = require("./middleware/loggerMiddleware");
 
 // Initialize Database Connection
-connectDB().then(() => {
-  seedInitialRecord();
-}).catch((err) => {
+connectDB().catch((err) => {
   console.error("DB connection error:", err);
 });
 

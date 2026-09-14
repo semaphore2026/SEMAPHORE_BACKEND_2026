@@ -162,21 +162,11 @@ const updateCollegeConfig = async (req, res) => {
   }
 };
 
-// Seed helper for initial setup
-const seedInitialRecord = async () => {
-  try {
-    await getOrInitConfig();
-  } catch (err) {
-    console.error("Error seeding CollegeConfig:", err.message);
-  }
-};
-
 module.exports = {
   getAllowedColleges,
   addAllowedCollege,
   updateAllowedCollege,
   deleteAllowedCollege,
   updateCollegeConfig,
-  seedInitialRecord,
   getOrInitConfig,
 };

@@ -20,6 +20,7 @@ const {
   getBackupPayments,
   getBackupPaymentDetails,
   getLogs,
+  deleteOlderLogs,
   deleteAdmin,
 } = require("../controllers/adminController");
 const {
@@ -184,6 +185,14 @@ router.delete("/teams", protectAdmin, deleteTeam); // Alias
 
 // ================= LOGS MANAGEMENT ROUTES =================
 router.get("/logs", protectAdmin, getLogs);
+router.delete("/logs/delete-oldest/:n", protectAdmin, deleteOlderLogs);
+router.delete("/logs/delete-oldest", protectAdmin, deleteOlderLogs);
+router.delete("/logs/older/:n", protectAdmin, deleteOlderLogs);
+router.delete("/logs/older", protectAdmin, deleteOlderLogs);
+router.delete("/logs/oldest/:n", protectAdmin, deleteOlderLogs);
+router.delete("/logs/oldest", protectAdmin, deleteOlderLogs);
+router.delete("/logs/:n", protectAdmin, deleteOlderLogs);
+router.delete("/logs", protectAdmin, deleteOlderLogs);
 
 module.exports = router;
 
