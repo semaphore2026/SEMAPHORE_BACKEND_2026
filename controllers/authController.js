@@ -15,15 +15,101 @@ const generateToken = (id) => {
   });
 };
 
-// Helper function to process college assignment and enforce max allowed teams
+// ---------------------------------------------------------------------------
+// Validation helpers
+// ---------------------------------------------------------------------------
+
+/**
+ * Validates a name field.
+ * - Required, non-empty after trim
+ * - Min 2 characters, max 100 characters
+ */
+const validateName = (name) => {
+  if (!name || typeof name !== "string" || !name.trim()) {
+    return "Name is required";
+  }
+  const clean = name.trim();
+  if (clean.length < 2) return "Name must be at least 2 characters long";
+  if (clean.length > 100) return "Name must be 100 characters or fewer";
+  return null;
+};
+
+/**
+ * Validates an email field.
+ * - Required, non-empty after trim
+ * - Must match standard email pattern
+ */
+const validateEmail = (email) => {
+  if (!email || typeof email !== "string" || !email.trim()) {
+    return "Email address is required";
+  }
+  const emailRegex = /^\w+([\.-]?\w+)*@\w+([\.-]?\w+)*(\.\w{2,3})+$/;
+  if (!emailRegex.test(email.trim().toLowerCase())) {
+    return "Please enter a valid email address";
+  }
+  return null;
+};
+
+/**
+ * Validates a password field.
+ * - Required, non-empty
+ * - Min 6 characters
+ */
+const validatePassword = (password) => {
+  if (!password || typeof password !== "string") {
+    return "Password is required";
+  }
+  if (password.length < 6) {
+    return "Password must be at least 6 characters long";
+  }
+  return null;
+};
+
+/**
+ * Validates a collegeName field.
+ * - Required, non-empty after trim
+ */
+const validateCollegeName = (collegeName) => {
+  if (!collegeName || typeof collegeName !== "string" || !collegeName.trim()) {
+    return "College name is required. Please select your college to complete registration";
+  }
+  return null;
+};
+
+// ---------------------------------------------------------------------------
+// College quota helper
+// ---------------------------------------------------------------------------
+
+/**
+ * Handles college assignment during registration, enforcing per-college quotas.
+ *
+ * Logic:
+ * 1. Ensure CollegeConfig exists (create default if not).
+ * 2. Look up an AllowedCollege record for the given college name.
+ *    - If found and isActive === false → reject (college not accepting registrations).
+ *    - If found and isActive === true → use its maxTeams as the quota.
+ *    - If NOT found and enforceAllowedListOnly === true → reject (college not on allowed list).
+ *    - If NOT found and enforceAllowedListOnly === false → use config.defaultMaxTeamsPerCollege as quota.
+ * 3. Count the CURRENT number of registered users for this college (live count, not cached counter).
+ * 4. If currentCount >= quota → reject with "quota full" error.
+ * 5. Otherwise:
+ *    - Find or create the College document.
+ *    - Atomically increment totalTeams using $inc to prevent race conditions.
+ * 6. Return the college document.
+ *
+ * @param {string} collegeName - The college name provided during registration
+ * @returns {Promise<Object>} The college document
+ * @throws {{ status: number, message: string }} On validation/quota failure
+ */
 const handleCollegeRegistration = async (collegeName) => {
-  if (!collegeName || !collegeName.trim()) {
-    throw { status: 400, message: "Please select a college name to complete registration" };
+  const nameError = validateCollegeName(collegeName);
+  if (nameError) {
+    throw { status: 400, message: nameError };
   }
 
   const cleanName = collegeName.trim();
 
-  // Fetch global config
+  // ── Step 1: Fetch or create global config ──────────────────────────────────
   let config = await CollegeConfig.findOne();
   if (!config) {
     config = await CollegeConfig.create({
@@ -32,9 +118,9 @@ const handleCollegeRegistration = async (collegeName) => {
     });
   }
 
-  // Fetch specific allowed college record if exists
+  // ── Step 2: Check AllowedCollege record ────────────────────────────────────
   const allowedRecord = await AllowedCollege.findOne({
-    collegeName: { $regex: new RegExp(`^${cleanName}$`, "i") },
+    collegeName: { $regex: new RegExp(`^${cleanName.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}$`, "i") },
   });
 
   let maxAllowed = config.defaultMaxTeamsPerCollege || 1;
@@ -43,31 +129,47 @@ const handleCollegeRegistration = async (collegeName) => {
     if (!allowedRecord.isActive) {
       throw {
         status: 400,
-        message: `Registration failed: '${allowedRecord.collegeName}' is currently not accepting new team registrations.`,
+        message: `Registration is currently closed for '${allowedRecord.collegeName}'. This college is not accepting new registrations at this time. Please contact the Semaphore team for assistance.`,
       };
     }
-    maxAllowed = allowedRecord.maxTeams;
+    maxAllowed = allowedRecord.maxTeams || 1;
   } else if (config.enforceAllowedListOnly) {
     throw {
       status: 400,
-      message: `Registration failed: '${cleanName}' is not in the list of allowed colleges.`,
+      message: `'${cleanName}' is not on the list of colleges allowed to register for Semaphore 2026. Please verify your college name or contact the event team.`,
     };
   }
 
-  let college = await College.findOne({
-    collegeName: { $regex: new RegExp(`^${cleanName}$`, "i") },
+  // ── Step 3: Live count of registered users for this college ────────────────
+  // We count actual User documents rather than relying on the cached totalTeams
+  // counter, which can drift if users are deleted or if a previous registration
+  // failed mid-way after the counter was already incremented.
+  const currentCount = await User.countDocuments({
+    $or: [
+      { collegeName: { $regex: new RegExp(`^${cleanName.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}$`, "i") } },
+    ],
   });
 
-  if (college) {
-    if (college.totalTeams >= maxAllowed) {
-      throw {
-        status: 400,
-        message: `Registration failed: '${college.collegeName}' has already reached the maximum limit of ${maxAllowed} registered accounts/teams.`,
-      };
-    }
-    college.totalTeams += 1;
-    await college.save();
-  } else {
+  // ── Step 4: Quota check ────────────────────────────────────────────────────
+  if (currentCount >= maxAllowed) {
+    const slotWord = maxAllowed === 1 ? "slot" : "slots";
+    throw {
+      status: 400,
+      message: `Registration is full for '${cleanName}'. This college has reached its maximum of ${maxAllowed} registered ${slotWord}. No more registrations are being accepted from this college.`,
+    };
+  }
+
+  // ── Step 5: Find or create College document, atomically update counter ─────
+  // Use findOneAndUpdate with $inc so that concurrent requests are serialised
+  // at the DB level and the counter never overshoots.
+  let college = await College.findOneAndUpdate(
+    { collegeName: { $regex: new RegExp(`^${cleanName.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}$`, "i") } },
+    { $inc: { totalTeams: 1 } },
+    { new: true }
+  );
+
+  if (!college) {
+    // First registration for this college — create the document
     college = await College.create({
       collegeName: cleanName,
       totalTeams: 1,
@@ -77,7 +179,10 @@ const handleCollegeRegistration = async (collegeName) => {
   return college;
 };
 
-// Helper to build comprehensive user response object with team & registered events
+// ---------------------------------------------------------------------------
+// Helper to build comprehensive user response object
+// ---------------------------------------------------------------------------
+
 const buildUserResponse = async (user, token = "") => {
   const populatedUser = await User.findById(user._id)
     .select("-password")
@@ -120,6 +225,10 @@ const buildUserResponse = async (user, token = "") => {
     token: token || generateToken(populatedUser._id),
   };
 };
+
+// ---------------------------------------------------------------------------
+// Controllers
+// ---------------------------------------------------------------------------
 
 // @desc    Google OAuth Signup / Login
 // @route   POST /api/auth/google
@@ -172,12 +281,22 @@ const googleAuth = async (req, res) => {
     let user = await User.findOne({ $or: [{ googleId }, { email }] }).populate("college");
 
     if (user) {
+      // Existing user — just log in, no quota check needed
       if (!user.googleId) {
         user.googleId = googleId;
         if (!user.avatar && picture) user.avatar = picture;
         await user.save();
       }
     } else {
+      // New Google user — college name is required, quota must be checked
+      const collegeNameError = validateCollegeName(collegeName);
+      if (collegeNameError) {
+        return res.status(400).json({
+          message:
+            "College name is required for new registrations. Please provide your college name along with the Google sign-in request.",
+        });
+      }
+
       let college;
       try {
         college = await handleCollegeRegistration(collegeName);
@@ -217,17 +336,39 @@ const registerUser = async (req, res) => {
   try {
     const { name, email, password, role, collegeName } = req.body;
 
-    if (!name || !email || !password || !collegeName) {
-      return res
-        .status(400)
-        .json({ message: "Please fill in all required fields (name, email, password, collegeName)" });
+    // ── Explicit field validation (surfaced before any DB calls) ──────────────
+    const validationErrors = [];
+
+    const nameErr = validateName(name);
+    if (nameErr) validationErrors.push(nameErr);
+
+    const emailErr = validateEmail(email);
+    if (emailErr) validationErrors.push(emailErr);
+
+    const passwordErr = validatePassword(password);
+    if (passwordErr) validationErrors.push(passwordErr);
+
+    const collegeErr = validateCollegeName(collegeName);
+    if (collegeErr) validationErrors.push(collegeErr);
+
+    if (validationErrors.length > 0) {
+      return res.status(400).json({
+        message: validationErrors[0], // Return first error for simplicity
+        errors: validationErrors,     // Also return all errors for detailed frontend handling
+      });
     }
 
-    const userExists = await User.findOne({ email });
+    const cleanEmail = email.trim().toLowerCase();
+
+    // ── Check for duplicate email ──────────────────────────────────────────────
+    const userExists = await User.findOne({ email: cleanEmail });
     if (userExists) {
-      return res.status(400).json({ message: "User already exists with this email" });
+      return res.status(400).json({
+        message: "An account with this email address already exists. Please log in or use a different email.",
+      });
     }
 
+    // ── College quota check & assignment ──────────────────────────────────────
     let college;
     try {
       college = await handleCollegeRegistration(collegeName);
@@ -235,11 +376,12 @@ const registerUser = async (req, res) => {
       return res.status(collegeErr.status || 400).json({ message: collegeErr.message });
     }
 
+    // ── Create user ────────────────────────────────────────────────────────────
     const user = await User.create({
-      name,
-      email,
+      name: name.trim(),
+      email: cleanEmail,
       password,
-      role: role || "user",
+      role: role === "admin" ? "user" : (role || "user"), // Prevent self-assigning admin role
       college: college._id,
       collegeName: college.collegeName,
     });
@@ -247,9 +389,31 @@ const registerUser = async (req, res) => {
     const jwtToken = generateToken(user._id);
     const userPayload = await buildUserResponse(user, jwtToken);
 
-    res.status(201).json(userPayload);
+    res.status(201).json({
+      message: "Registration successful",
+      ...userPayload,
+    });
   } catch (error) {
-    res.status(500).json({ message: error.message });
+    console.error("Register User Error:", error);
+
+    // Surface Mongoose validation errors cleanly
+    if (error.name === "ValidationError") {
+      const messages = Object.values(error.errors).map((e) => e.message);
+      return res.status(400).json({
+        message: messages[0],
+        errors: messages,
+      });
+    }
+
+    // Duplicate key error (e.g. unique index on email)
+    if (error.code === 11000) {
+      const field = Object.keys(error.keyValue || {})[0] || "field";
+      return res.status(400).json({
+        message: `An account with this ${field} already exists.`,
+      });
+    }
+
+    res.status(500).json({ message: "Registration failed due to an internal error. Please try again." });
   }
 };
 
@@ -261,10 +425,11 @@ const loginUser = async (req, res) => {
     const { email, password } = req.body;
 
     if (!email || !password) {
-      return res.status(400).json({ message: "Please provide email and password" });
+      return res.status(400).json({ message: "Please provide both email and password" });
     }
 
-    const user = await User.findOne({ email });
+    const cleanEmail = email.trim().toLowerCase();
+    const user = await User.findOne({ email: cleanEmail });
 
     if (user && (await user.matchPassword(password))) {
       const jwtToken = generateToken(user._id);
@@ -275,6 +440,7 @@ const loginUser = async (req, res) => {
       res.status(401).json({ message: "Invalid email or password" });
     }
   } catch (error) {
+    console.error("Login User Error:", error);
     res.status(500).json({ message: error.message });
   }
 };
@@ -297,6 +463,7 @@ const getUserProfile = async (req, res) => {
     const userPayload = await buildUserResponse(user, token);
     res.status(200).json(userPayload);
   } catch (error) {
+    console.error("Get User Profile Error:", error);
     res.status(500).json({ message: error.message });
   }
 };
@@ -328,6 +495,7 @@ const verifyUser = async (req, res) => {
       ...userPayload,
     });
   } catch (error) {
+    console.error("Verify User Error:", error);
     res.status(500).json({ message: error.message });
   }
 };
@@ -338,4 +506,5 @@ module.exports = {
   loginUser,
   getUserProfile,
   verifyUser,
+  handleCollegeRegistration, // exported for potential reuse
 };

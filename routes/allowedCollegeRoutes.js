@@ -2,13 +2,17 @@ const express = require("express");
 const router = express.Router();
 const {
   getAllowedColleges,
+  checkCollegeAvailability,
   addAllowedCollege,
   updateAllowedCollege,
   deleteAllowedCollege,
   updateCollegeConfig,
 } = require("../controllers/allowedCollegeController");
 
-// Endpoints
+// Public — check if a college has slots available (call this before registration)
+router.get("/check/:collegeName", checkCollegeAvailability);
+
+// CRUD
 router.get("/", getAllowedColleges);
 router.post("/", addAllowedCollege);
 router.put("/config", updateCollegeConfig);
